@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>SB Flash Pro</title>
+
+<style>
+body{
+    font-family: Meiryo, sans-serif;
+    background:#f5f5f5;
+    margin:0;
+    padding:0;
+}
+
+.screen{
+    width:1100px;
+    margin:auto;
+    background:white;
+    padding:10px;
+}
+
+.row{
+    display:flex;
+    align-items:center;
+    margin-bottom:8px;
+}
+
+.row.center{
+    justify-content:center;
+}
+
+.row.space{
+    justify-content:space-between;
+}
+
+.label{
+    margin-right:10px;
+}
+
+.question{
+    font-size:18px;
+    background:#fff;
+    padding:10px;
+    border:1px solid #ccc;
+}
+
+.answer-area{
+    width:100%;
+    height:80px;
+}
+
+.result{
+    font-size:20px;
+    font-weight:bold;
+}
+
+.image-panel{
+    border:1px solid #ccc;
+    padding:5px;
+    width:220px;
+    height:160px;
+}
+
+button{
+    margin-right:6px;
+    padding:6px 10px;
+}
+
+.help{
+    font-size:12px;
+    color:#555;
+}
+</style>
+
+</head>
+
+<body>
+
+<div class="screen" id="pro_main">
+
+<!-- 上部バー -->
+<div class="row space" id="top_bar">
+
+<select id="sheet_combo">
+<option>財務会計</option>
+</select>
+
+<span id="mode_label">通常出題</span>
+
+<span id="clock_label">00:00</span>
+
+<span id="top_info">No:1 / 100</span>
+
+</div>
+
+
+<!-- 設問エリア -->
+<div class="row" id="question_area">
+
+<div style="flex:1">
+
+<div class="question" id="q_text">
+ここに問題文が表示されます
+</div>
+
+</div>
+
+<div class="image-panel" id="q_image_panel">
+設問画像
+</div>
+
+</div>
+
+
+<!-- 絞り込み -->
+<div class="row center" id="filter_area">
+
+<button id="topic_btn">
+この論点だけ復習
+</button>
+
+<button id="clear_filter_btn">
+絞り込み解除
+</button>
+
+</div>
+
+
+<!-- 回答入力 -->
+<div class="row" id="answer_input_area">
+
+<label class="label">回答（入力）</label>
+
+<input type="text" id="answer_entry">
+
+<button id="correct_btn">○</button>
+<button id="wrong_btn">×</button>
+
+</div>
+
+
+<!-- 選択肢ボタン -->
+<div class="row center" id="choice_buttons">
+
+<button id="btn1">1</button>
+<button id="btn2">2</button>
+<button id="btn3">3</button>
+<button id="btn4">4</button>
+<button id="btn5">5</button>
+<button id="btnA">A</button>
+<button id="btnB">B</button>
+<button id="btnC">C</button>
+
+</div>
+
+
+<!-- 操作ボタン -->
+<div class="row center" id="control_buttons">
+
+<button id="prev_btn">前へ</button>
+
+<button id="check_btn">回答確認</button>
+
+<button id="next_btn">次へ</button>
+
+<button id="bookmark_btn">しおり</button>
+
+<button id="image_btn">画像拡大</button>
+
+<button id="help_btn">HELP</button>
+
+</div>
+
+
+<!-- 結果表示 -->
+<div class="row" id="result_area">
+
+<span class="result" id="result_label">
+結果
+</span>
+
+<span id="lower_mode_badge">
+通常
+</span>
+
+</div>
+
+
+<!-- 正解解説 -->
+<div class="row" id="correct_area">
+
+<div style="flex:1">
+
+<textarea class="answer-area" id="correct_text">
+ここに正解と解説
+</textarea>
+
+</div>
+
+<div class="image-panel" id="a_image_panel">
+解答画像
+</div>
+
+</div>
+
+
+<!-- ヘルプ -->
+<div class="row" id="help_area">
+
+<div class="help" id="help_text">
+
+F7:前へ  
+F8:次へ  
+F9:回答確認  
+F1:ログ記録  
+
+</div>
+
+</div>
+
+</div>
+
+</body>
+</html>
