@@ -51,10 +51,11 @@ COL_ANSWER = 2
 COL_QUESTION_IMAGE = 3
 COL_ANSWER_IMAGE = 4
 COL_EXPLANATION = 5
-COL_SUBJECT = 6
-COL_TAGS = 7
-COL_KEYWORDS = 8
-MIN_CARD_COLUMNS = 9
+COL_MNEMONIC = 6
+COL_SUBJECT = 7
+COL_TAGS = 8
+COL_KEYWORDS = 9
+MIN_CARD_COLUMNS = 10
 
 # ===== v0.4 追加：データ開始行（Excel上の行番号） =====
 DATA_START_ROW_DEFAULT = 2   # 通常シート：2行目からデータ
@@ -282,6 +283,10 @@ def _safe_iloc(row, col_index, default=""):
     return default if pd.isna(value) else value
 
 
+def has_trim_value(v) -> bool:
+    return str(v if v is not None else "").strip() != ""
+
+
 def extract_question_row(row, row_number_for_fallback: int):
     q_no = str(_safe_iloc(row, COL_QUESTION_NO, "")).strip()
     q = str(_safe_iloc(row, COL_QUESTION, "")).strip()
@@ -289,6 +294,7 @@ def extract_question_row(row, row_number_for_fallback: int):
     question_img_path = str(_safe_iloc(row, COL_QUESTION_IMAGE, "")).strip()
     answer_img_path = str(_safe_iloc(row, COL_ANSWER_IMAGE, "")).strip()
     explanation = str(_safe_iloc(row, COL_EXPLANATION, "")).strip()
+    mnemonic = str(_safe_iloc(row, COL_MNEMONIC, "")).strip()
     subj = str(_safe_iloc(row, COL_SUBJECT, "")).strip()
     tags_value = _safe_iloc(row, COL_TAGS, None)
     keywords_value = _safe_iloc(row, COL_KEYWORDS, None)
@@ -306,6 +312,7 @@ def extract_question_row(row, row_number_for_fallback: int):
         "answer_image_path": answer_img_path,
         "image_path": answer_img_path,
         "explanation": explanation,
+        "mnemonic": mnemonic,
         "subject": subj,
         "tags": tags,
         "keywords": keywords,
@@ -321,9 +328,10 @@ def load_cards(excel_path: str, sheet_name: str, data_start_row: int = DATA_STAR
       D: question_image_path(optional)  ※設問画像ファイルパス（相対はexe/py基準）
       E: answer_image_path(optional)    ※解答画像ファイルパス（相対はexe/py基準）
       F: explanation(optional)          ※解説
-      G: subject(optional)
-      H: tags(optional)
-      I: keywords(optional)
+      G: mnemonic(optional)             ※語呂合せ
+      H: subject(optional)
+      I: tags(optional)
+      J: keywords(optional)
     """
     path = Path(excel_path)
     if not path.exists():
@@ -358,6 +366,7 @@ WRONG_COLUMNS = [
     "answer_image_path",
     "image_path",
     "explanation",
+    "mnemonic",
     "subject",
     "tags",
     "keywords",
@@ -495,6 +504,7 @@ def upsert_answer_log(
     answer_image_path: str = "",
     image_path: str = "",
     explanation: str = "",
+    mnemonic: str = "",
     subject: str = "",
     tags_list=None,
     keywords_list=None,
@@ -533,6 +543,7 @@ def upsert_answer_log(
         df.at[idx, "answer_image_path"] = answer_image_path
         df.at[idx, "image_path"] = answer_image_path or image_path
         df.at[idx, "explanation"] = explanation
+        df.at[idx, "mnemonic"] = mnemonic
         df.at[idx, "subject"] = subject
         df.at[idx, "tags"] = tags_str
         df.at[idx, "keywords"] = kw_str
@@ -558,6 +569,7 @@ def upsert_answer_log(
             "answer_image_path": answer_image_path,
             "image_path": answer_image_path or image_path,
             "explanation": explanation,
+            "mnemonic": mnemonic,
             "subject": subject,
             "tags": tags_str,
             "keywords": kw_str,
@@ -856,6 +868,7 @@ class FlashcardsApp(tk.Tk):
         self._last_is_ok = None  # v0.08: 直近の判定（保存に使う）
 
         self.lower_mode = "answer"  # 初期は正解モード
+        self.lower_modes = ["answer"]
         self.q_font = ("Yu Gothic UI", 20)
         self.a_font = ("Yu Gothic UI", 18)
 
@@ -1001,7 +1014,7 @@ class FlashcardsApp(tk.Tk):
         self.action_frame.grid(row=3, column=0, sticky="ew")
         # ボタンは pack のまま
         self.check_btn = tk.Button(self.action_frame, text="回答(F1)", command=self.check_answer)
-        self.toggle_answer_explain_btn = tk.Button(self.action_frame, text="正解/解説(F2)", command=self.toggle_answer_explain)
+        self.toggle_answer_explain_btn = tk.Button(self.action_frame, text="正解(F2)", command=self.toggle_answer_explain)
         self.save_answer_btn = tk.Button(self.action_frame, text="回答保存(F3)", command=self.save_answer_log)
         # v0.09: 自己採点（長文/表現ゆれ救済）
         self.self_ok_btn = tk.Button(self.action_frame, text="正解にする(F10)", command=lambda: self.self_grade(True))
@@ -1033,14 +1046,14 @@ class FlashcardsApp(tk.Tk):
         self.bottom_frame.grid_columnconfigure(0, weight=1)
         self.bottom_frame.grid_columnconfigure(1, weight=0)
 
-        # 結果表示（正解/不正解）＋モード表示（[解説]のみ）
+        # 結果表示（正解/不正解）＋モード表示（[解説]/[語呂合せ]）
         self.result_line = tk.Frame(self.bottom_frame)
         self.result_line.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
         self.result_label = tk.Label(self.result_line, text="", anchor="w", font=("Yu Gothic UI", 14, "bold"))
         self.result_label.pack(side="left")
 
-        # v0.08: 下段表示モードバッジ（解説の時だけ表示）
+        # v0.08+: 下段表示モードバッジ（解説/語呂合せの時だけ表示）
         self.lower_mode_badge = tk.Label(self.result_line, text="", anchor="w", font=("Yu Gothic UI", 12, "bold"))
         self.lower_mode_badge.pack(side="left", padx=(8, 0))
 
@@ -1128,6 +1141,32 @@ class FlashcardsApp(tk.Tk):
         widget.insert("1.0", value)
         widget.configure(state="disabled")
 
+    def _build_lower_modes(self, item: dict) -> list:
+        modes = ["answer"]
+        if has_trim_value(item.get("explanation", "")):
+            modes.append("explain")
+        if has_trim_value(item.get("mnemonic", "")):
+            modes.append("mnemonic")
+        return modes
+
+    def _build_f2_button_label(self, item: dict) -> str:
+        labels = ["正解"]
+        if has_trim_value(item.get("explanation", "")):
+            labels.append("解説")
+        if has_trim_value(item.get("mnemonic", "")):
+            labels.append("語呂合せ")
+        return "/".join(labels) + "(F2)"
+
+    def _apply_current_f2_label(self) -> None:
+        try:
+            item = self.current()
+            self.lower_modes = self._build_lower_modes(item)
+            self.lower_mode = "answer"
+            if hasattr(self, "toggle_answer_explain_btn"):
+                self.toggle_answer_explain_btn.configure(text=self._build_f2_button_label(item))
+        except Exception:
+            pass
+
     def _tick_clock(self):
         try:
             self.clock_label.configure(text=time.strftime("%Y/%m/%d %H:%M:%S"))
@@ -1136,12 +1175,18 @@ class FlashcardsApp(tk.Tk):
         self.after(1000, self._tick_clock)
 
     def _update_lower_mode_badge(self) -> None:
-        """下段が『解説』表示のときだけ [解説] を表示する（未判定時は非表示）。"""
+        """下段が『解説』『語呂合せ』表示のときだけバッジを表示する（未判定時は非表示）。"""
         try:
             if not getattr(self, "_checked_this_card", False):
                 txt = ""
             else:
-                txt = "[解説]" if getattr(self, "lower_mode", "answer") == "explain" else ""
+                mode = getattr(self, "lower_mode", "answer")
+                if mode == "explain":
+                    txt = "[解説]"
+                elif mode == "mnemonic":
+                    txt = "[語呂合せ]"
+                else:
+                    txt = ""
             if hasattr(self, "lower_mode_badge"):
                 self.lower_mode_badge.configure(text=txt)
         except Exception:
@@ -1161,6 +1206,7 @@ class FlashcardsApp(tk.Tk):
             pass
 
     def clear_answer_area(self):
+        self._apply_current_f2_label()
         self.answer_text.delete("1.0", "end")
         if hasattr(self, "ox_var"):
             self.ox_var.set("")
@@ -1416,7 +1462,12 @@ class FlashcardsApp(tk.Tk):
 
 
     def toggle_answer_explain(self):
-        self.lower_mode = "explain" if self.lower_mode == "answer" else "answer"
+        modes = getattr(self, "lower_modes", None) or self._build_lower_modes(self.current())
+        try:
+            idx = modes.index(getattr(self, "lower_mode", "answer"))
+        except ValueError:
+            idx = 0
+        self.lower_mode = modes[(idx + 1) % len(modes)]
         self._update_lower_mode_badge()
         if getattr(self, "_checked_this_card", False):
             self._refresh_lower_text()
@@ -1427,10 +1478,14 @@ class FlashcardsApp(tk.Tk):
             text = (item.get("answer", "") or "").strip()
             if not text:
                 text = "（この問題は解答セルが空です）"
-        else:
+        elif self.lower_mode == "explain":
             text = (item.get("explanation", "") or "").strip()
             if not text:
                 text = "（解説なし）"
+        else:
+            text = (item.get("mnemonic", "") or "").strip()
+            if not text:
+                text = "（語呂合せなし）"
         self.set_text(self.correct_text, text)
 
     def check_answer(self):
