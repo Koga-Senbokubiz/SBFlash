@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-SBFlashPro.py (stable build v0.11)
+SBFlashPro.py (stable build v0.13)
 
 v0.08 変更点
 - 上段（設問）にスクロールバー追加
@@ -37,6 +37,25 @@ from PIL import Image, ImageTk
 
 DEFAULT_INI = "SBFlashPro.ini"
 
+# =====================================
+# SBFlash Pro Version (on-code)
+# =====================================
+APP_VERSION = "0.13"
+
+# =====================================
+# SBKnowledgeData Layout (0 origin)
+# =====================================
+COL_QUESTION_NO = 0
+COL_QUESTION = 1
+COL_ANSWER = 2
+COL_QUESTION_IMAGE = 3
+COL_ANSWER_IMAGE = 4
+COL_EXPLANATION = 5
+COL_SUBJECT = 6
+COL_TAGS = 7
+COL_KEYWORDS = 8
+MIN_CARD_COLUMNS = 9
+
 # ===== v0.4 追加：データ開始行（Excel上の行番号） =====
 DATA_START_ROW_DEFAULT = 2   # 通常シート：2行目からデータ
 WRONG_START_ROW = 3          # 回答シート：3行目からデータ（2行目は日本語タイトル行想定）
@@ -55,7 +74,6 @@ def _create_default_ini(path: Path) -> None:
     text = (
         "[app]\n"
         "app_title=暗記カード\n"
-        "app_version=0.08\n"
         "EXCEL_PATH=FlashCards.xlsx\n"
         "initial_sheet=sheet0\n"
         "wrong_sheet=回答シート\n"
@@ -144,7 +162,7 @@ def load_settings() -> dict:
     return {
         "ini_path": str(ini_path),
         "app_title": app.get("app_title", "暗記カード").strip(),
-        "app_version": app.get("app_version", "").strip(),
+        "app_version": APP_VERSION,
         "EXCEL_PATH": str(excel_path),
         "initial_sheet": app.get("initial_sheet", "sheet0").strip(),
         "wrong_sheet": app.get("wrong_sheet", "回答シート").strip(),
@@ -256,6 +274,44 @@ def resolve_sheet_name(excel_path: str, sheet_arg: str | None) -> str:
         return str(sheet_arg) if sheet_arg is not None else "sheet0"
 
 
+def _safe_iloc(row, col_index, default=""):
+    try:
+        value = row.iloc[col_index]
+    except Exception:
+        return default
+    return default if pd.isna(value) else value
+
+
+def extract_question_row(row, row_number_for_fallback: int):
+    q_no = str(_safe_iloc(row, COL_QUESTION_NO, "")).strip()
+    q = str(_safe_iloc(row, COL_QUESTION, "")).strip()
+    a = str(_safe_iloc(row, COL_ANSWER, "")).strip()
+    question_img_path = str(_safe_iloc(row, COL_QUESTION_IMAGE, "")).strip()
+    answer_img_path = str(_safe_iloc(row, COL_ANSWER_IMAGE, "")).strip()
+    explanation = str(_safe_iloc(row, COL_EXPLANATION, "")).strip()
+    subj = str(_safe_iloc(row, COL_SUBJECT, "")).strip()
+    tags_value = _safe_iloc(row, COL_TAGS, None)
+    keywords_value = _safe_iloc(row, COL_KEYWORDS, None)
+    tags = [] if tags_value is None else parse_tags(tags_value)
+    keywords = [] if keywords_value is None else parse_keywords(keywords_value)
+
+    if not q_no:
+        q_no = str(row_number_for_fallback)
+
+    return {
+        "question_no": q_no,
+        "question": q,
+        "answer": a,
+        "question_image_path": question_img_path,
+        "answer_image_path": answer_img_path,
+        "image_path": answer_img_path,
+        "explanation": explanation,
+        "subject": subj,
+        "tags": tags,
+        "keywords": keywords,
+    }
+
+
 def load_cards(excel_path: str, sheet_name: str, data_start_row: int = DATA_START_ROW_DEFAULT):
     """
     出題シート（1行目ヘッダー）
@@ -276,40 +332,18 @@ def load_cards(excel_path: str, sheet_name: str, data_start_row: int = DATA_STAR
     df = pd.read_excel(path, sheet_name=sheet_name)
     # データ開始行を調整（1行目はヘッダー扱い）
     df = df.iloc[max(0, data_start_row - 2):].reset_index(drop=True)
-    while df.shape[1] < 9:
+    while df.shape[1] < MIN_CARD_COLUMNS:
         df[df.shape[1]] = None
     df = df.dropna(how="all")
 
     cards = []
     for i, (_, row) in enumerate(df.iterrows(), start=1):
-        q_no = "" if pd.isna(row.iloc[0]) else str(row.iloc[0]).strip()
-        q = "" if pd.isna(row.iloc[1]) else str(row.iloc[1]).strip()
-        a = "" if pd.isna(row.iloc[2]) else str(row.iloc[2]).strip()
-        question_img_path = "" if pd.isna(row.iloc[3]) else str(row.iloc[3]).strip()
-        answer_img_path = "" if pd.isna(row.iloc[4]) else str(row.iloc[4]).strip()
-        explanation = "" if pd.isna(row.iloc[5]) else str(row.iloc[5]).strip()
-        subj = "" if pd.isna(row.iloc[6]) else str(row.iloc[6]).strip()
-        tags = [] if pd.isna(row.iloc[7]) else parse_tags(row.iloc[7])
-        keywords = [] if pd.isna(row.iloc[8]) else parse_keywords(row.iloc[8])
-
-        if not q:
+        card = extract_question_row(row, i)
+        if not card["question"]:
             continue
-        if not q_no:
-            q_no = str(i)
 
-        cards.append({
-            "source_sheet": str(sheet_name),
-            "question_no": str(q_no).strip(),
-            "question": q,
-            "answer": a,
-            "question_image_path": question_img_path,
-            "answer_image_path": answer_img_path,
-            "image_path": answer_img_path,
-            "explanation": explanation,
-            "subject": subj,
-            "tags": tags,
-            "keywords": keywords,
-        })
+        card["source_sheet"] = str(sheet_name)
+        cards.append(card)
 
     return cards
 
@@ -1815,7 +1849,7 @@ def main():
         wrong_sheet=str(wrong_sheet),
         base_cards=base_cards,
         app_title=settings.get("app_title", "暗記カード"),
-        app_version=settings.get("app_version", ""),
+        app_version=APP_VERSION,
         ui_settings=settings.get("ui", {}),
         ini_path=settings.get("ini_path"),
         data_start_row_default=settings.get("data_start_row_default", DATA_START_ROW_DEFAULT),
