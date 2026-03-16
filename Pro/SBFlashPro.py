@@ -40,7 +40,7 @@ DEFAULT_INI = "SBFlashPro.ini"
 # =====================================
 # SBFlash Pro Version (on-code)
 # =====================================
-APP_VERSION = "0.13"
+APP_VERSION = "0.14"
 
 # =====================================
 # SBKnowledgeData Layout (0 origin)
@@ -141,11 +141,22 @@ def load_settings() -> dict:
         except Exception:
             return default
 
-    # EXCEL_PATH が相対なら、exe/pyと同じフォルダ基準にする
-    excel_path_raw = app.get("EXCEL_PATH", "FlashCards.xlsx").strip()
+    # excel_path / EXCEL_PATH を受け付ける。相対パスは ini → exe/py → 親フォルダ の順で解決する
+    excel_path_raw = app.get("excel_path", fallback=app.get("EXCEL_PATH", "FlashCards.xlsx")).strip()
     excel_path = Path(excel_path_raw)
     if not excel_path.is_absolute():
-        excel_path = _base_dir() / excel_path
+        candidates = [
+            ini_path.parent / excel_path,
+            _base_dir() / excel_path,
+            _base_dir().parent / excel_path,
+            Path.cwd() / excel_path,
+        ]
+        resolved = None
+        for c in candidates:
+            if c.exists():
+                resolved = c
+                break
+        excel_path = resolved if resolved is not None else candidates[0]
 
     ui_settings = {
         "window_width": get_int(ui, "window_width", 0),
@@ -861,6 +872,7 @@ class FlashcardsApp(tk.Tk):
         self.cards = cards[:]
         self.index = 0
         self.topic_tag = None
+        self.reverse_mode = False
 
         self.correct_count = 0
         self.wrong_count = 0
@@ -969,8 +981,10 @@ class FlashcardsApp(tk.Tk):
 
         self.btn_frame = tk.Frame(self.mid_frame)
         self.btn_frame.grid(row=0, column=0, sticky="w", pady=(0, 8))
+        self.reverse_btn = tk.Button(self.btn_frame, text="設問←→解答", command=self.toggle_reverse_mode)
+        self.reverse_btn.pack(side="left")
         self.topic_btn = tk.Button(self.btn_frame, text="この論点だけ復習", command=self.filter_by_current_topic)
-        self.topic_btn.pack(side="left")
+        self.topic_btn.pack(side="left", padx=(8, 0))
         self.clear_btn = tk.Button(self.btn_frame, text="絞り込み解除", command=self.clear_filter, state="disabled")
         self.clear_btn.pack(side="left", padx=(8, 0))
 
@@ -1141,6 +1155,22 @@ class FlashcardsApp(tk.Tk):
         widget.insert("1.0", value)
         widget.configure(state="disabled")
 
+    def _get_display_question(self, item: dict) -> str:
+        if self.reverse_mode:
+            return f"{item.get('answer','')}"
+        return f"{item.get('question','')}"
+
+    def _get_display_answer(self, item: dict) -> str:
+        if self.reverse_mode:
+            text = (item.get("question", "") or "").strip()
+            if not text:
+                text = "（この問題は設問セルが空です）"
+            return text
+        text = (item.get("answer", "") or "").strip()
+        if not text:
+            text = "（この問題は解答セルが空です）"
+        return text
+
     def _build_lower_modes(self, item: dict) -> list:
         modes = ["answer"]
         if has_trim_value(item.get("explanation", "")):
@@ -1150,7 +1180,7 @@ class FlashcardsApp(tk.Tk):
         return modes
 
     def _build_f2_button_label(self, item: dict) -> str:
-        labels = ["正解"]
+        labels = ["設問" if self.reverse_mode else "正解"]
         if has_trim_value(item.get("explanation", "")):
             labels.append("解説")
         if has_trim_value(item.get("mnemonic", "")):
@@ -1224,10 +1254,14 @@ class FlashcardsApp(tk.Tk):
 
     def _update_mode_label(self):
         try:
-            text = "通常"
+            mode_text = "逆出題" if self.reverse_mode else "通常"
             if self.topic_tag:
-                text = f"論点:{self.topic_tag}"
+                text = f"{mode_text}  論点:{self.topic_tag}"
+            else:
+                text = mode_text
             self.mode_label.configure(text=text)
+            if hasattr(self, "reverse_btn"):
+                self.reverse_btn.configure(text=("設問←→解答 ON" if self.reverse_mode else "設問←→解答"))
         except Exception:
             pass
 
@@ -1298,7 +1332,7 @@ class FlashcardsApp(tk.Tk):
     def render(self):
         item = self.current()
         self._set_current_position(save=True)
-        self.set_text(self.q_text, f"{item.get('question','')}")
+        self.set_text(self.q_text, self._get_display_question(item))
         self._show_question_image(item)
         self.update_nav_buttons()
         self._update_mode_label()
@@ -1367,20 +1401,32 @@ class FlashcardsApp(tk.Tk):
     # ---------------- Image helpers ----------------
     def _get_question_image_path(self, item: dict) -> str:
         try:
-            img_path = str(item.get("question_image_path", "") or "").strip()
-            if not img_path:
-                k = (sheet_key(item.get("source_sheet")), str(item.get("question_no", "")).strip())
-                img_path = str(self._qimage_map.get(k, "") or "").strip()
+            if self.reverse_mode:
+                img_path = str(item.get("answer_image_path", item.get("image_path", "")) or "").strip()
+                if not img_path:
+                    k = (sheet_key(item.get("source_sheet")), str(item.get("question_no", "")).strip())
+                    img_path = str(self._aimage_map.get(k, "") or "").strip()
+            else:
+                img_path = str(item.get("question_image_path", "") or "").strip()
+                if not img_path:
+                    k = (sheet_key(item.get("source_sheet")), str(item.get("question_no", "")).strip())
+                    img_path = str(self._qimage_map.get(k, "") or "").strip()
             return img_path
         except Exception:
             return ""
 
     def _get_answer_image_path(self, item: dict) -> str:
         try:
-            img_path = str(item.get("answer_image_path", item.get("image_path", "")) or "").strip()
-            if not img_path:
-                k = (sheet_key(item.get("source_sheet")), str(item.get("question_no", "")).strip())
-                img_path = str(self._aimage_map.get(k, "") or "").strip()
+            if self.reverse_mode:
+                img_path = str(item.get("question_image_path", "") or "").strip()
+                if not img_path:
+                    k = (sheet_key(item.get("source_sheet")), str(item.get("question_no", "")).strip())
+                    img_path = str(self._qimage_map.get(k, "") or "").strip()
+            else:
+                img_path = str(item.get("answer_image_path", item.get("image_path", "")) or "").strip()
+                if not img_path:
+                    k = (sheet_key(item.get("source_sheet")), str(item.get("question_no", "")).strip())
+                    img_path = str(self._aimage_map.get(k, "") or "").strip()
             return img_path
         except Exception:
             return ""
@@ -1475,9 +1521,7 @@ class FlashcardsApp(tk.Tk):
     def _refresh_lower_text(self):
         item = self.current()
         if self.lower_mode == "answer":
-            text = (item.get("answer", "") or "").strip()
-            if not text:
-                text = "（この問題は解答セルが空です）"
+            text = self._get_display_answer(item)
         elif self.lower_mode == "explain":
             text = (item.get("explanation", "") or "").strip()
             if not text:
@@ -1491,12 +1535,12 @@ class FlashcardsApp(tk.Tk):
     def check_answer(self):
         item = self.current()
         user_raw = self.answer_text.get("1.0", "end-1c").strip()
-        correct_raw = (item.get("answer", "") or "").strip()
+        correct_raw = self._get_display_answer(item).strip()
         first_check = not self._checked_this_card
 
-        # 解答セルが空でも『正解（情報）』として扱う（保存できる）
-        if not correct_raw:
-            self.result_label.configure(text="ℹ️ 正解（解答セルが空です）")
+        # 逆出題時は元の設問、通常時は元の解答が比較対象
+        if not correct_raw or correct_raw in ("（この問題は解答セルが空です）", "（この問題は設問セルが空です）"):
+            self.result_label.configure(text="ℹ️ 正解（比較対象セルが空です）")
             self._last_is_ok = True
 
             if first_check:
@@ -1568,6 +1612,16 @@ class FlashcardsApp(tk.Tk):
             self.after(900, lambda: self.result_label.configure(text=""))
         except Exception as e:
             messagebox.showerror("保存エラー", str(e))
+
+    def toggle_reverse_mode(self):
+        try:
+            self.reverse_mode = not self.reverse_mode
+            self.lower_mode = "answer"
+            self._checked_this_card = False
+            self._last_is_ok = None
+            self.render()
+        except Exception:
+            pass
 
     # ---------------- Filter by tag ----------------
     def filter_by_current_topic(self):
@@ -1863,6 +1917,7 @@ def parse_args():
     p.add_argument("--sheet", default=None, help="シート名 or 番号（0始まり）。未指定は先頭シート")
     p.add_argument("--random", action="store_true", help="ランダム出題（通常モード）")
     p.add_argument("--wrong-sheet", default=None, help="回答シート名（指定時のみiniより優先）")
+    p.add_argument("--reverse", action="store_true", help="設問/解答を逆転して開始")
     return p.parse_args()
 
 
@@ -1910,6 +1965,12 @@ def main():
         data_start_row_default=settings.get("data_start_row_default", DATA_START_ROW_DEFAULT),
         wrong_start_row=settings.get("wrong_start_row", WRONG_START_ROW),
     )
+    if args.reverse:
+        try:
+            app.reverse_mode = True
+            app.render()
+        except Exception:
+            pass
     app.mainloop()
 
 
