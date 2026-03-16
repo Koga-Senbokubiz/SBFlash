@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-SBFlashPro.py (stable build v0.13)
+SBFlashPro.py (stable build v0.15)
+
+v0.15 変更点
+- 上段ボタン列に「ランダム出題」追加
+- ランダム出題はトグル式（ON/OFF表示）
+- ランダムON時も「この論点だけ復習」「絞り込み解除」と共存
+- シート切替後もランダムモード状態を維持して並びを再構成
 
 v0.08 変更点
 - 上段（設問）にスクロールバー追加
@@ -40,7 +46,7 @@ DEFAULT_INI = "SBFlashPro.ini"
 # =====================================
 # SBFlash Pro Version (on-code)
 # =====================================
-APP_VERSION = "0.14"
+APP_VERSION = "0.15"
 
 # =====================================
 # SBKnowledgeData Layout (0 origin)
@@ -235,26 +241,15 @@ def sheet_key(s: str) -> str:
 
 
 def list_question_sheets(excel_path: str) -> list[str]:
-    """問題シート候補を返す。
-
-    表示除外:
-    - 「＜データ＞」で始まるシート
-    - 「回答シート」
+    """問題シート候補: 回答シート（wrong_sheet）以外、かつ先頭行に question がありそうなシートを優先したいが、
+    ここでは単純に全シートを返し、UI操作で選ぶ前提にする（安定優先）。
     """
     p = Path(excel_path)
     if not p.exists():
         return []
     try:
         xls = pd.ExcelFile(p)
-        sheet_names = []
-        for name in xls.sheet_names:
-            s = str(name).strip()
-            if s.startswith("＜データ＞"):
-                continue
-            if s == "回答シート":
-                continue
-            sheet_names.append(name)
-        return sheet_names
+        return list(xls.sheet_names)
     except Exception:
         return []
 
@@ -860,7 +855,8 @@ class FlashcardsApp(tk.Tk):
                  ui_settings: dict | None = None,
                  ini_path: str | None = None,
                  data_start_row_default: int = DATA_START_ROW_DEFAULT,
-                 wrong_start_row: int = WRONG_START_ROW):
+                 wrong_start_row: int = WRONG_START_ROW,
+                 initial_random_mode: bool = False):
         super().__init__()
         self.excel_path = excel_path
         self.source_sheet = str(source_sheet)
@@ -880,10 +876,12 @@ class FlashcardsApp(tk.Tk):
         attach_geometry_saver(self, self.ini_path)
 
         self.all_cards = cards[:]
+        self.filtered_cards = cards[:]
         self.cards = cards[:]
         self.index = 0
         self.topic_tag = None
         self.reverse_mode = False
+        self.random_mode = False
 
         self.correct_count = 0
         self.wrong_count = 0
@@ -992,8 +990,10 @@ class FlashcardsApp(tk.Tk):
 
         self.btn_frame = tk.Frame(self.mid_frame)
         self.btn_frame.grid(row=0, column=0, sticky="w", pady=(0, 8))
-        self.reverse_btn = tk.Button(self.btn_frame, text="設問←→解答", command=self.toggle_reverse_mode)
+        self.reverse_btn = tk.Button(self.btn_frame, text="解答⇔設問", command=self.toggle_reverse_mode)
         self.reverse_btn.pack(side="left")
+        self.random_btn = tk.Button(self.btn_frame, text="ランダム出題", command=self.toggle_random_mode)
+        self.random_btn.pack(side="left", padx=(8, 0))
         self.topic_btn = tk.Button(self.btn_frame, text="この論点だけ復習", command=self.filter_by_current_topic)
         self.topic_btn.pack(side="left", padx=(8, 0))
         self.clear_btn = tk.Button(self.btn_frame, text="絞り込み解除", command=self.clear_filter, state="disabled")
@@ -1156,6 +1156,8 @@ class FlashcardsApp(tk.Tk):
         self.bind_all("<F11>", lambda e: self.self_grade(False))
         self.bind_all("<Escape>", lambda e: _safe_invoke(self.exit_btn))
 
+        self.random_mode = bool(initial_random_mode)
+        self._rebuild_cards_view(reset_index=True)
         self._tick_clock()
         self.render()
 
@@ -1207,6 +1209,54 @@ class FlashcardsApp(tk.Tk):
                 self.toggle_answer_explain_btn.configure(text=self._build_f2_button_label(item))
         except Exception:
             pass
+    def _current_card_key(self, item: dict | None) -> tuple[str, str]:
+        if not item:
+            return ("", "")
+        return (
+            str(item.get("source_sheet", self.source_sheet) or "").strip(),
+            str(item.get("question_no", "") or "").strip(),
+        )
+
+    def _rebuild_cards_view(self, *, keep_current: bool = False, reset_index: bool = False) -> None:
+        source_cards = (getattr(self, "filtered_cards", None) or self.all_cards or [])[:]
+        current_key = None
+        if keep_current and getattr(self, "cards", None):
+            try:
+                current_key = self._current_card_key(self.current())
+            except Exception:
+                current_key = None
+
+        self.cards = source_cards[:]
+        if self.random_mode:
+            random.shuffle(self.cards)
+
+        if not self.cards:
+            self.index = 0
+            return
+
+        if reset_index:
+            self.index = 0
+            return
+
+        if current_key:
+            for i, card in enumerate(self.cards):
+                if self._current_card_key(card) == current_key:
+                    self.index = i
+                    return
+
+        if self.index >= len(self.cards):
+            self.index = len(self.cards) - 1
+        if self.index < 0:
+            self.index = 0
+
+    def _update_random_button(self) -> None:
+        try:
+            if hasattr(self, "random_btn"):
+                # トグル式らしく、ボタンには「次に切り替わる先」を表示する
+                self.random_btn.configure(text=("通常出題" if self.random_mode else "ランダム出題"))
+        except Exception:
+            pass
+
 
     def _tick_clock(self):
         try:
@@ -1265,14 +1315,11 @@ class FlashcardsApp(tk.Tk):
 
     def _update_mode_label(self):
         try:
-            mode_text = "逆出題" if self.reverse_mode else "通常"
-            if self.topic_tag:
-                text = f"{mode_text}  論点:{self.topic_tag}"
-            else:
-                text = mode_text
-            self.mode_label.configure(text=text)
+            # セレクトボックス横には、現在の出題順モードだけをわかりやすく表示する
+            self.mode_label.configure(text=("ランダム出題" if self.random_mode else "通常出題"))
             if hasattr(self, "reverse_btn"):
-                self.reverse_btn.configure(text=("設問←→解答 ON" if self.reverse_mode else "設問←→解答"))
+                self.reverse_btn.configure(text=("設問⇔解答" if self.reverse_mode else "解答⇔設問"))
+            self._update_random_button()
         except Exception:
             pass
 
@@ -1378,8 +1425,9 @@ class FlashcardsApp(tk.Tk):
                 c["source_sheet"] = str(sheet_name)
 
             self.base_cards = base_cards[:]
+            self.all_cards = base_cards[:]
+            self.filtered_cards = base_cards[:]
             self.cards = base_cards[:]
-            self.all_cards = self.cards[:]
             self.index = 0
             self.topic_tag = None
             self.correct_count = 0
@@ -1392,6 +1440,8 @@ class FlashcardsApp(tk.Tk):
 
             if hasattr(self, "clear_btn"):
                 self.clear_btn.configure(state="disabled")
+
+            self._rebuild_cards_view(reset_index=True)
 
             # 画像索引更新
             self._qimage_map = {}
@@ -1634,6 +1684,14 @@ class FlashcardsApp(tk.Tk):
         except Exception:
             pass
 
+    def toggle_random_mode(self):
+        try:
+            self.random_mode = not self.random_mode
+            self._rebuild_cards_view(keep_current=True)
+            self.render()
+        except Exception:
+            pass
+
     # ---------------- Filter by tag ----------------
     def filter_by_current_topic(self):
         item = self.current()
@@ -1641,22 +1699,25 @@ class FlashcardsApp(tk.Tk):
         if not tags:
             return
         tag = tags[0]
-        self.topic_tag = tag
-        self.cards = [c for c in self.all_cards if tag in (c.get("tags", []) or [])]
-        if not self.cards:
-            self.cards = self.all_cards[:]
+        filtered = [c for c in self.all_cards if tag in (c.get("tags", []) or [])]
+        if not filtered:
+            self.filtered_cards = self.all_cards[:]
             self.topic_tag = None
             messagebox.showinfo("情報", "この論点タグに該当する問題が見つかりませんでした。")
             return
+        self.topic_tag = tag
+        self.filtered_cards = filtered
         self.index = 0
         self.clear_btn.configure(state="normal")
+        self._rebuild_cards_view(reset_index=True)
         self.render()
 
     def clear_filter(self):
-        self.cards = self.all_cards[:]
+        self.filtered_cards = self.all_cards[:]
         self.topic_tag = None
         self.index = 0
         self.clear_btn.configure(state="disabled")
+        self._rebuild_cards_view(reset_index=True)
         self.render()
 
     # ---------------- Navigation ----------------
@@ -1955,8 +2016,6 @@ def main():
             c["source_sheet"] = str(sheet_name)
 
         cards = base_cards[:]
-        if args.random:
-            random.shuffle(cards)
 
     except Exception as e:
         tk.Tk().withdraw()
@@ -1975,6 +2034,7 @@ def main():
         ini_path=settings.get("ini_path"),
         data_start_row_default=settings.get("data_start_row_default", DATA_START_ROW_DEFAULT),
         wrong_start_row=settings.get("wrong_start_row", WRONG_START_ROW),
+        initial_random_mode=bool(args.random),
     )
     if args.reverse:
         try:
