@@ -235,15 +235,26 @@ def sheet_key(s: str) -> str:
 
 
 def list_question_sheets(excel_path: str) -> list[str]:
-    """問題シート候補: 回答シート（wrong_sheet）以外、かつ先頭行に question がありそうなシートを優先したいが、
-    ここでは単純に全シートを返し、UI操作で選ぶ前提にする（安定優先）。
+    """問題シート候補を返す。
+
+    表示除外:
+    - 「＜データ＞」で始まるシート
+    - 「回答シート」
     """
     p = Path(excel_path)
     if not p.exists():
         return []
     try:
         xls = pd.ExcelFile(p)
-        return list(xls.sheet_names)
+        sheet_names = []
+        for name in xls.sheet_names:
+            s = str(name).strip()
+            if s.startswith("＜データ＞"):
+                continue
+            if s == "回答シート":
+                continue
+            sheet_names.append(name)
+        return sheet_names
     except Exception:
         return []
 
