@@ -1,223 +1,470 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<title>SB Flash Pro</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SBFlashPro Version0.12 - Mock</title>
+  <style>
+    /*
+      SBFlashPro 画面モック
+      - 手修正しやすいように、HTML構造はできるだけ単純化
+      - 配色や余白は style 内でまとめて調整可能
+      - 画像差し替えは <img src="..."> を書き換えるだけ
+    */
 
-<style>
-body{
-    font-family: Meiryo, sans-serif;
-    background:#f5f5f5;
-    margin:0;
-    padding:0;
-}
+    :root {
+      --win-bg: #efefef;
+      --client-bg: #efefef;
+      --panel-bg: #ffffff;
+      --border-dark: #9a9a9a;
+      --border-light: #d8d8d8;
+      --button-face: #efefef;
+      --button-highlight: #ffffff;
+      --button-shadow: #7d7d7d;
+      --text: #111;
+      --muted: #666;
+      --font-ui: "Yu Gothic UI", "Meiryo", sans-serif;
+    }
 
-.screen{
-    width:1100px;
-    margin:auto;
-    background:white;
-    padding:10px;
-}
+    * {
+      box-sizing: border-box;
+    }
 
-.row{
-    display:flex;
-    align-items:center;
-    margin-bottom:8px;
-}
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      background: #dcdcdc;
+      font-family: var(--font-ui);
+      color: var(--text);
+    }
 
-.row.center{
-    justify-content:center;
-}
+    .window {
+      width: 1280px;
+      height: 889px;
+      margin: 0 auto;
+      background: var(--win-bg);
+      border: 1px solid #cfcfcf;
+      overflow: hidden;
+    }
 
-.row.space{
-    justify-content:space-between;
-}
+    .titlebar {
+      height: 31px;
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      background: linear-gradient(#f8f8f8, #ededed);
+      border-bottom: 1px solid #d4d4d4;
+      font-size: 12px;
+      color: #6b6b6b;
+    }
 
-.label{
-    margin-right:10px;
-}
+    .titlebar .app-dot {
+      width: 14px;
+      height: 14px;
+      margin-right: 8px;
+      border-radius: 3px;
+      background: #9aa9b9;
+      flex: 0 0 auto;
+    }
 
-.question{
-    font-size:18px;
-    background:#fff;
-    padding:10px;
-    border:1px solid #ccc;
-}
+    .titlebar .caption {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
-.answer-area{
-    width:100%;
-    height:80px;
-}
+    .titlebar .controls {
+      display: flex;
+      gap: 4px;
+      color: #555;
+      font-size: 14px;
+      user-select: none;
+    }
 
-.result{
-    font-size:20px;
-    font-weight:bold;
-}
+    .titlebar .ctl {
+      width: 24px;
+      text-align: center;
+    }
 
-.image-panel{
-    border:1px solid #ccc;
-    padding:5px;
-    width:220px;
-    height:160px;
-}
+    .client {
+      height: calc(100% - 31px);
+      padding: 4px 10px 8px 10px;
+      background: var(--client-bg);
+      position: relative;
+    }
 
-button{
-    margin-right:6px;
-    padding:6px 10px;
-}
+    .top-row {
+      height: 28px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 12px;
+      margin-bottom: 2px;
+    }
 
-.help{
-    font-size:12px;
-    color:#555;
-}
-</style>
+    .combo {
+      width: 192px;
+      height: 22px;
+      border: 1px solid var(--border-dark);
+      background: #fff;
+      padding: 0 26px 0 7px;
+      font: inherit;
+      appearance: none;
+      background-image:
+        linear-gradient(45deg, transparent 50%, #444 50%),
+        linear-gradient(135deg, #444 50%, transparent 50%),
+        linear-gradient(to bottom, #f8f8f8, #e9e9e9);
+      background-position:
+        calc(100% - 14px) 8px,
+        calc(100% - 9px) 8px,
+        calc(100% - 22px) 0;
+      background-size: 5px 5px, 5px 5px, 22px 100%;
+      background-repeat: no-repeat;
+    }
 
+    .status-line {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 820px 420px;
+      grid-template-rows: 255px 32px 28px 132px 36px 237px;
+      column-gap: 10px;
+      row-gap: 6px;
+    }
+
+    .sunken {
+      background: #fff;
+      border-top: 1px solid var(--border-dark);
+      border-left: 1px solid var(--border-dark);
+      border-right: 1px solid var(--border-light);
+      border-bottom: 1px solid var(--border-light);
+      position: relative;
+    }
+
+    .scroll::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 16px;
+      height: 100%;
+      background: #efefef;
+      border-left: 1px solid #d2d2d2;
+    }
+
+    .scroll::before {
+      content: "▲\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A\A▼";
+      white-space: pre;
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      width: 10px;
+      text-align: center;
+      color: #7a7a7a;
+      font-size: 9px;
+      line-height: 8px;
+      z-index: 1;
+    }
+
+    .question {
+      grid-column: 1;
+      grid-row: 1;
+      padding: 6px 18px 6px 6px;
+      font-size: 18px;
+      line-height: 1.35;
+      background: #fdfdfd;
+    }
+
+    .image-panel-top {
+      grid-column: 2;
+      grid-row: 1;
+      padding: 18px 8px 8px 8px;
+      background: #efefef;
+      position: relative;
+    }
+
+    .image-panel-top .group-title,
+    .image-panel-bottom .group-title {
+      position: absolute;
+      top: -10px;
+      left: 10px;
+      font-size: 12px;
+      background: var(--client-bg);
+      padding: 0 6px;
+      color: #333;
+    }
+
+    .image-preview {
+      width: 240px;
+      height: 195px;
+      margin: 0 auto 8px auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      background: #fff;
+      border: none;
+    }
+
+    .image-preview img {
+      max-width: 100%;
+      max-height: 100%;
+      display: block;
+      object-fit: contain;
+    }
+
+    .big-button,
+    .small-button,
+    .action-button,
+    .end-button,
+    .mark-button {
+      background: var(--button-face);
+      border-top: 1px solid var(--button-highlight);
+      border-left: 1px solid var(--button-highlight);
+      border-right: 1px solid var(--button-shadow);
+      border-bottom: 1px solid var(--button-shadow);
+      color: #111;
+      font-family: var(--font-ui);
+      cursor: default;
+    }
+
+    .small-button {
+      height: 28px;
+      padding: 0 8px;
+      font-size: 12px;
+    }
+
+    .small-button[disabled] {
+      color: #999;
+      background: #f3f3f3;
+    }
+
+    .controls-row {
+      grid-column: 1;
+      grid-row: 2;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .top-image-button-wrap,
+    .bottom-image-button-wrap {
+      display: flex;
+      justify-content: center;
+    }
+
+    .big-button {
+      width: 100%;
+      max-width: 400px;
+      height: 25px;
+      font-size: 12px;
+    }
+
+    .answer-label-row {
+      grid-column: 1;
+      grid-row: 3;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      padding-left: 6px;
+    }
+
+    .mark-button {
+      width: 38px;
+      height: 33px;
+      font-size: 20px;
+      line-height: 1;
+      padding: 0;
+    }
+
+    .answer-box {
+      grid-column: 1 / span 2;
+      grid-row: 4;
+      padding: 6px;
+      font-size: 17px;
+      line-height: 1.3;
+      background: #fdfdfd;
+    }
+
+    .action-row {
+      grid-column: 1 / span 2;
+      grid-row: 5;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .action-button,
+    .end-button {
+      height: 28px;
+      padding: 0 9px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .spacer {
+      flex: 1;
+    }
+
+    .explain-box {
+      grid-column: 1;
+      grid-row: 6;
+      padding: 8px 18px 8px 8px;
+      background: #fdfdfd;
+      font-size: 18px;
+      line-height: 1.5;
+    }
+
+    .result-line {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .image-panel-bottom {
+      grid-column: 2;
+      grid-row: 6;
+      padding: 18px 8px 8px 8px;
+      background: #efefef;
+      position: relative;
+      align-self: start;
+      height: 230px;
+    }
+
+    .image-panel-bottom .image-preview {
+      width: 160px;
+      height: 175px;
+      margin-bottom: 8px;
+    }
+
+    .footnote {
+      position: absolute;
+      left: 14px;
+      bottom: 10px;
+      font-size: 12px;
+      color: #111;
+      white-space: nowrap;
+    }
+
+    /* 修正しやすいように最低限の hover だけ */
+    button:hover {
+      filter: brightness(0.99);
+    }
+  </style>
 </head>
-
 <body>
+  <div class="window">
+    <div class="titlebar">
+      <div class="app-dot"></div>
+      <div class="caption">SBFlashPro Version0.12 - SBKnowledgeData.xlsx [宅建業法]</div>
+      <div class="controls">
+        <div class="ctl">—</div>
+        <div class="ctl">□</div>
+        <div class="ctl">×</div>
+      </div>
+    </div>
 
-<div class="screen" id="pro_main">
+    <div class="client">
+      <div class="top-row">
+        <select class="combo">
+          <option selected>宅建業法</option>
+        </select>
 
-<!-- 上部バー -->
-<div class="row" id="top_bar" style="background:#dcdcdc;padding:4px">
+        <div class="status-line">
+          <span>通常</span>
+          <span>2026/03/13 21:51:40</span>
+          <span>No:Q001</span>
+          <span>1 / 129</span>
+          <span>〇:0</span>
+          <span>×:1</span>
+          <span>正答率:0.0%</span>
+          <span>回答進捗:5/129 (3.9%)</span>
+          <span>正解進捗:3/129 (2.3%)</span>
+        </div>
+      </div>
 
-<select id="sheet_combo">
-<option>財務会計</option>
-</select>
+      <div class="layout">
+        <!-- 問題文 -->
+        <div class="sunken scroll question">
+          準工業地域内の土地は建築資材置場として利用されていても宅地である
+        </div>
 
-<span id="mode_label" style="margin-left:40px">通常</span>
+        <!-- 右上画像 -->
+        <fieldset class="sunken image-panel-top">
+          <legend class="group-title">画像</legend>
+          <div class="image-preview">
+            <!-- ここを書き換えるだけで画像差し替え可能 -->
+            <img src="sample-top-image.jpg" alt="問題画像" />
+          </div>
+          <div class="top-image-button-wrap">
+            <button class="big-button">画像拡大</button>
+          </div>
+        </fieldset>
 
-<span id="clock_label" style="margin-left:20px">00:00</span>
+        <!-- 復習ボタン -->
+        <div class="controls-row">
+          <button class="small-button">設問←→解答</button>
+          <button class="small-button">ランダム出題</button>
+          <button class="small-button">この論点だけ復習</button>
+          <button class="small-button">絞り込み解除</button>
+        </div>
 
-<span id="top_info" style="margin-left:20px">No:1 / 100</span>
+        <!-- 回答ラベル -->
+        <div class="answer-label-row">
+          <span>回答入力&nbsp;[設問/解答逆転中]</span>
+          <button class="mark-button">〇</button>
+          <button class="mark-button">×</button>
+        </div>
 
-</div>
+        <!-- 回答欄 -->
+        <div class="sunken answer-box">×</div>
 
-<!-- 設問エリア -->
-<div class="row" id="question_area">
+        <!-- 中央ボタン群 -->
+        <div class="action-row">
+          <button class="action-button">回答(F1)</button>
+          <button class="action-button">正解/解説(F2)</button>
+          <button class="action-button">回答保存(F3)</button>
+          <button class="action-button">しおり設定/解除(F5)</button>
+          <button class="action-button">しおり全解除(F6)</button>
+          <button class="action-button">前問題(F7)</button>
+          <button class="action-button">次問題(F8)</button>
+          <button class="action-button">次のしおり(F9)</button>
+          <button class="action-button">正解にする(F10)</button>
+          <button class="action-button">不正解にする(F11)</button>
+          <div class="spacer"></div>
+          <button class="end-button">終了(ESC)</button>
+        </div>
 
-<div style="flex:1">
+        <!-- 解説欄 -->
+        <div class="sunken scroll explain-box">
+          <div class="result-line">× 不正解</div>
+          <div>〇</div>
+        </div>
 
-<div class="question" id="q_text">
-ここに問題文が表示されます
-</div>
+        <!-- 右下画像 -->
+        <fieldset class="sunken image-panel-bottom">
+          <legend class="group-title">画像</legend>
+          <div class="image-preview">
+            <!-- ここを書き換えるだけで画像差し替え可能 -->
+            <img src="sample-bottom-image.jpg" alt="解説画像" />
+          </div>
+          <div class="bottom-image-button-wrap">
+            <button class="big-button">画像拡大</button>
+          </div>
+        </fieldset>
+      </div>
 
-</div>
-
-<div class="image-panel" id="q_image_panel">
-設問画像
-</div>
-
-</div>
-
-
-<!-- 絞り込み -->
-<div class="row center" id="filter_area">
-
-<button id="topic_btn">
-この論点だけ復習
-</button>
-
-<button id="clear_filter_btn">
-絞り込み解除
-</button>
-
-</div>
-
-
-<!-- 回答入力 -->
-<div class="row" id="answer_input_area">
-
-<label class="label">回答（入力）</label>
-
-<input type="text" id="answer_entry">
-
-<button id="correct_btn">○</button>
-<button id="wrong_btn">×</button>
-
-</div>
-
-
-<!-- 選択肢ボタン -->
-<div class="row center" id="choice_buttons">
-
-<button id="btn1">1</button>
-<button id="btn2">2</button>
-<button id="btn3">3</button>
-<button id="btn4">4</button>
-<button id="btn5">5</button>
-<button id="btnA">A</button>
-<button id="btnB">B</button>
-<button id="btnC">C</button>
-
-</div>
-
-
-<!-- 操作ボタン -->
-<div class="row center" id="control_buttons">
-
-<button id="prev_btn">前へ</button>
-
-<button id="check_btn">回答確認</button>
-
-<button id="next_btn">次へ</button>
-
-<button id="bookmark_btn">しおり</button>
-
-<button id="image_btn">画像拡大</button>
-
-<button id="help_btn">HELP</button>
-
-</div>
-
-
-<!-- 結果表示 -->
-<div class="row" id="result_area">
-
-<span class="result" id="result_label">
-結果
-</span>
-
-<span id="lower_mode_badge">
-通常
-</span>
-
-</div>
-
-
-<!-- 正解解説 -->
-<div class="row" id="correct_area">
-
-<div style="flex:1">
-
-<textarea class="answer-area" id="correct_text">
-ここに正解と解説
-</textarea>
-
-</div>
-
-<div class="image-panel" id="a_image_panel">
-解答画像
-</div>
-
-</div>
-
-
-<!-- ヘルプ -->
-<div class="row" id="help_area">
-
-<div class="help" id="help_text">
-
-F7:前へ  
-F8:次へ  
-F9:回答確認  
-F1:ログ記録  
-
-</div>
-
-</div>
-
-</div>
-
+      <div class="footnote">判定/保存はボタンのみ。※保存はF1判定後。「回答保存」で回答シートへ登録（削除はExcel手動）</div>
+    </div>
+  </div>
 </body>
 </html>
