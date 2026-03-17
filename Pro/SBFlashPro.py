@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-SBFlashPro.py (stable build v0.15)
+SBFlashPro.py (stable build v0.16)
+
+v0.16 変更点
+- 設問/解答 逆転ボタンの表示文言を ini で切替可能に変更
+  - reverse_label_normal=解答⇔設問
+  - reverse_label_reversed=設問⇔解答
+  - 例: 英語⇔日本語 / 日本語⇔英語
 
 v0.15 変更点
 - 上段ボタン列に「ランダム出題」追加
@@ -46,7 +52,7 @@ DEFAULT_INI = "SBFlashPro.ini"
 # =====================================
 # SBFlash Pro Version (on-code)
 # =====================================
-APP_VERSION = "0.15"
+APP_VERSION = "0.16"
 
 # =====================================
 # SBKnowledgeData Layout (0 origin)
@@ -175,6 +181,8 @@ def load_settings() -> dict:
         "max_height": get_int(ui, "max_height", 1400),
         "thumb_size": get_int(ui, "thumb_size", 400),
         "zoom_max": get_int(ui, "zoom_max", 1200),
+        "reverse_label_normal": (ui.get("reverse_label_normal", fallback="解答⇔設問") if ui is not None else "解答⇔設問").strip() or "解答⇔設問",
+        "reverse_label_reversed": (ui.get("reverse_label_reversed", fallback="設問⇔解答") if ui is not None else "設問⇔解答").strip() or "設問⇔解答",
     }
 
     return {
@@ -240,19 +248,34 @@ def sheet_key(s: str) -> str:
     return t.strip().lower()
 
 
-def list_question_sheets(excel_path: str) -> list[str]:
-    """問題シート候補: 回答シート（wrong_sheet）以外、かつ先頭行に question がありそうなシートを優先したいが、
-    ここでは単純に全シートを返し、UI操作で選ぶ前提にする（安定優先）。
-    """
+def list_question_sheets(excel_path: str, wrong_sheet_name: str = "回答シート") -> list[str]:
     p = Path(excel_path)
     if not p.exists():
         return []
+
     try:
         xls = pd.ExcelFile(p)
-        return list(xls.sheet_names)
+        sheets = list(xls.sheet_names)
+
+        filtered = []
+        for s in sheets:
+            name = str(s).strip()
+
+            # ＜データ＞で始まるシートは除外
+            if name.startswith("＜データ＞"):
+                continue
+
+            # 回答シートは除外
+            if sheet_key(name) == sheet_key(wrong_sheet_name):
+                continue
+
+            filtered.append(name)
+
+        return filtered
+
     except Exception:
         return []
-
+        
 
 def resolve_sheet_name(excel_path: str, sheet_arg: str | None) -> str:
     """sheet指定を実シート名に解決する。
@@ -990,7 +1013,11 @@ class FlashcardsApp(tk.Tk):
 
         self.btn_frame = tk.Frame(self.mid_frame)
         self.btn_frame.grid(row=0, column=0, sticky="w", pady=(0, 8))
-        self.reverse_btn = tk.Button(self.btn_frame, text="解答⇔設問", command=self.toggle_reverse_mode)
+        self.reverse_btn = tk.Button(
+            self.btn_frame,
+            text=str(self.ui_settings.get("reverse_label_normal", "解答⇔設問")),
+            command=self.toggle_reverse_mode,
+        )
         self.reverse_btn.pack(side="left")
         self.random_btn = tk.Button(self.btn_frame, text="ランダム出題", command=self.toggle_random_mode)
         self.random_btn.pack(side="left", padx=(8, 0))
@@ -1318,7 +1345,9 @@ class FlashcardsApp(tk.Tk):
             # セレクトボックス横には、現在の出題順モードだけをわかりやすく表示する
             self.mode_label.configure(text=("ランダム出題" if self.random_mode else "通常出題"))
             if hasattr(self, "reverse_btn"):
-                self.reverse_btn.configure(text=("設問⇔解答" if self.reverse_mode else "解答⇔設問"))
+                normal_label = str(self.ui_settings.get("reverse_label_normal", "解答⇔設問") or "解答⇔設問")
+                reversed_label = str(self.ui_settings.get("reverse_label_reversed", "設問⇔解答") or "設問⇔解答")
+                self.reverse_btn.configure(text=(reversed_label if self.reverse_mode else normal_label))
             self._update_random_button()
         except Exception:
             pass
