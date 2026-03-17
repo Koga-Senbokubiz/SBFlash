@@ -1350,6 +1350,22 @@ class FlashcardsApp(tk.Tk):
         except Exception:
             pass
 
+    def _update_topic_button_state(self) -> None:
+        try:
+            state = "disabled"
+            if hasattr(self, "topic_btn") and getattr(self, "cards", None):
+                item = self.current()
+                tags = item.get("tags", []) or []
+                if tags:
+                    state = "normal"
+                self.topic_btn.configure(state=state)
+        except Exception:
+            try:
+                if hasattr(self, "topic_btn"):
+                    self.topic_btn.configure(state="disabled")
+            except Exception:
+                pass
+
     def _read_sheet_log_map(self) -> dict:
         records = {}
         try:
@@ -1421,6 +1437,7 @@ class FlashcardsApp(tk.Tk):
         self._show_question_image(item)
         self.update_nav_buttons()
         self._update_mode_label()
+        self._update_topic_button_state()
         self.update_top_info()
         self._update_lower_mode_badge()
         self.update_bookmark_ui()
