@@ -1021,7 +1021,7 @@ class FlashcardsApp(tk.Tk):
         self.reverse_btn.pack(side="left")
         self.random_btn = tk.Button(self.btn_frame, text="ランダム出題", command=self.toggle_random_mode)
         self.random_btn.pack(side="left", padx=(8, 0))
-        self.topic_btn = tk.Button(self.btn_frame, text="この論点だけ復習", command=self.filter_by_current_topic)
+        self.topic_btn = tk.Button(self.btn_frame, text="論点復習", command=self.filter_by_current_topic)
         self.topic_btn.pack(side="left", padx=(8, 0))
 
         self.answer_row = tk.Frame(self.mid_frame)
