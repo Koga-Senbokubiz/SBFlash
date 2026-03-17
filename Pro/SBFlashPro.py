@@ -1023,8 +1023,6 @@ class FlashcardsApp(tk.Tk):
         self.random_btn.pack(side="left", padx=(8, 0))
         self.topic_btn = tk.Button(self.btn_frame, text="この論点だけ復習", command=self.filter_by_current_topic)
         self.topic_btn.pack(side="left", padx=(8, 0))
-        self.clear_btn = tk.Button(self.btn_frame, text="絞り込み解除", command=self.clear_filter, state="disabled")
-        self.clear_btn.pack(side="left", padx=(8, 0))
 
         self.answer_row = tk.Frame(self.mid_frame)
         self.answer_row.grid(row=1, column=0, sticky="w")
@@ -1467,9 +1465,6 @@ class FlashcardsApp(tk.Tk):
 
             self._update_window_title()
 
-            if hasattr(self, "clear_btn"):
-                self.clear_btn.configure(state="disabled")
-
             self._rebuild_cards_view(reset_index=True)
 
             # 画像索引更新
@@ -1737,15 +1732,6 @@ class FlashcardsApp(tk.Tk):
         self.topic_tag = tag
         self.filtered_cards = filtered
         self.index = 0
-        self.clear_btn.configure(state="normal")
-        self._rebuild_cards_view(reset_index=True)
-        self.render()
-
-    def clear_filter(self):
-        self.filtered_cards = self.all_cards[:]
-        self.topic_tag = None
-        self.index = 0
-        self.clear_btn.configure(state="disabled")
         self._rebuild_cards_view(reset_index=True)
         self.render()
 
