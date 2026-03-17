@@ -1023,6 +1023,8 @@ class FlashcardsApp(tk.Tk):
         self.random_btn.pack(side="left", padx=(8, 0))
         self.topic_btn = tk.Button(self.btn_frame, text="論点復習", command=self.filter_by_current_topic)
         self.topic_btn.pack(side="left", padx=(8, 0))
+        self.topic_label = tk.Label(self.btn_frame, text="", anchor="w")
+        self.topic_label.pack(side="left", padx=(8, 0))
 
         self.answer_row = tk.Frame(self.mid_frame)
         self.answer_row.grid(row=1, column=0, sticky="w")
@@ -1352,17 +1354,36 @@ class FlashcardsApp(tk.Tk):
 
     def _update_topic_button_state(self) -> None:
         try:
+            if not hasattr(self, "topic_btn"):
+                return
+
+            button_text = "論点復習"
+            label_text = ""
             state = "disabled"
-            if hasattr(self, "topic_btn") and getattr(self, "cards", None):
+
+            current_tags = []
+            if getattr(self, "cards", None):
                 item = self.current()
-                tags = item.get("tags", []) or []
-                if tags:
-                    state = "normal"
-                self.topic_btn.configure(state=state)
+                current_tags = item.get("tags", []) or []
+
+            if self.topic_tag:
+                button_text = "復習解除"
+                label_text = str(self.topic_tag)
+                state = "normal"
+            elif current_tags:
+                button_text = "論点復習"
+                label_text = str(current_tags[0])
+                state = "normal"
+
+            self.topic_btn.configure(text=button_text, state=state)
+            if hasattr(self, "topic_label"):
+                self.topic_label.configure(text=label_text)
         except Exception:
             try:
                 if hasattr(self, "topic_btn"):
-                    self.topic_btn.configure(state="disabled")
+                    self.topic_btn.configure(text="論点復習", state="disabled")
+                if hasattr(self, "topic_label"):
+                    self.topic_label.configure(text="")
             except Exception:
                 pass
 
@@ -1735,17 +1756,28 @@ class FlashcardsApp(tk.Tk):
 
     # ---------------- Filter by tag ----------------
     def filter_by_current_topic(self):
+        if self.topic_tag:
+            self.filtered_cards = self.all_cards[:]
+            self.topic_tag = None
+            self._rebuild_cards_view(keep_current=True)
+            self.render()
+            return
+
         item = self.current()
         tags = item.get("tags", []) or []
         if not tags:
             return
+
         tag = tags[0]
         filtered = [c for c in self.all_cards if tag in (c.get("tags", []) or [])]
         if not filtered:
             self.filtered_cards = self.all_cards[:]
             self.topic_tag = None
             messagebox.showinfo("情報", "この論点タグに該当する問題が見つかりませんでした。")
+            self._rebuild_cards_view(keep_current=True)
+            self.render()
             return
+
         self.topic_tag = tag
         self.filtered_cards = filtered
         self.index = 0
