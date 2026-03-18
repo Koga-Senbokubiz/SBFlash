@@ -1,6 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-SBFlashPro.py (stable build v0.16)
+SBFlashPro.py (stable build v0.18)
+
+v0.18 変更点
+- 上部バーに「進捗ログ」ボタンを追加
+- 現在シートの進捗ログ（logs/<sheet>.log）を別ウィンドウで表示
+- ログがないときはボタンを非活性
+
+v0.17 変更点
+- 上部バーに「進捗リセット」ボタンを追加
+- 現在シートの進捗ログ（logs/<sheet>.log）を確認付きで削除
+- 回答進捗 / 正解進捗をその場で 0 に更新
 
 v0.16 変更点
 - 設問/解答 逆転ボタンの表示文言を ini で切替可能に変更
@@ -52,7 +62,7 @@ DEFAULT_INI = "SBFlashPro.ini"
 # =====================================
 # SBFlash Pro Version (on-code)
 # =====================================
-APP_VERSION = "0.16"
+APP_VERSION = "0.18"
 
 # =====================================
 # SBKnowledgeData Layout (0 origin)
@@ -949,6 +959,12 @@ class FlashcardsApp(tk.Tk):
         self.top_info = tk.Label(self.top_bar, text="", anchor="w")
         self.top_info.pack(side="left", fill="x", expand=True)
 
+        self.progress_log_btn = tk.Button(self.top_bar, text="進捗ログ", command=self.show_progress_log)
+        self.progress_log_btn.pack(side="right", padx=(8, 10))
+
+        self.progress_reset_btn = tk.Button(self.top_bar, text="進捗リセット", command=self.reset_progress_log)
+        self.progress_reset_btn.pack(side="right", padx=(8, 0))
+
         self.sheet_combo.bind("<<ComboboxSelected>>", self.on_sheet_selected)
 
         # ==================================================
@@ -1450,6 +1466,7 @@ class FlashcardsApp(tk.Tk):
                 f"   正解進捗:{progress_ok_count}/{prog_total} ({progress_ok_rate:.1f}%)"
             )
         )
+        self._update_progress_buttons()
 
     def render(self):
         item = self.current()
@@ -1598,6 +1615,17 @@ class FlashcardsApp(tk.Tk):
 
     # ---------------- Answer / Explain ----------------
 
+    def _build_result_message(self, is_ok: bool, self_graded: bool = False) -> str:
+        item = self.current()
+        mnemonic = (item.get("mnemonic", "") or "").strip()
+        result = "✅ 正解！" if is_ok else "✖ 不正解"
+        if self_graded:
+            result += "（自己採点）"
+        if mnemonic:
+            result += f"    語呂：{mnemonic}"
+        return result
+
+
     # ==================================================
     # v0.09: 自己採点（長文/表現ゆれ救済）
     #   - F10: 正解にする
@@ -1618,9 +1646,9 @@ class FlashcardsApp(tk.Tk):
                 self.update_top_info()
 
             if is_ok:
-                self.result_label.configure(text="✅ 正解！（自己採点）")
+                self.result_label.configure(text=self._build_result_message(True, self_graded=True))
             else:
-                self.result_label.configure(text="✖ 不正解（自己採点）")
+                self.result_label.configure(text=self._build_result_message(False, self_graded=True))
 
             # 下段（正解/解説）を更新し、画像も表示
             self._refresh_lower_text()
@@ -1694,9 +1722,9 @@ class FlashcardsApp(tk.Tk):
         self._last_is_ok = bool(is_ok)
 
         if is_ok:
-            self.result_label.configure(text="✅ 正解！")
+            self.result_label.configure(text=self._build_result_message(True))
         else:
-            self.result_label.configure(text="✖ 不正解")
+            self.result_label.configure(text=self._build_result_message(False))
 
         self._refresh_lower_text()
         self._show_answer_image(item)
@@ -1988,6 +2016,125 @@ class FlashcardsApp(tk.Tk):
         log_dir = os.path.join(self._get_app_dir(), "logs")
         os.makedirs(log_dir, exist_ok=True)
         return os.path.join(log_dir, f"{self._safe_sheet_filename(self.source_sheet)}.log")
+
+    def _has_progress_log(self) -> bool:
+        try:
+            log_path = self._get_progress_log_path()
+            return os.path.exists(log_path) and os.path.getsize(log_path) > 0
+        except Exception:
+            return False
+
+    def _update_progress_buttons(self) -> None:
+        try:
+            state = ("normal" if self._has_progress_log() else "disabled")
+            if hasattr(self, "progress_reset_btn"):
+                self.progress_reset_btn.configure(state=state)
+            if hasattr(self, "progress_log_btn"):
+                self.progress_log_btn.configure(state=state)
+        except Exception:
+            pass
+
+    def _format_progress_log_text(self, log_path: str) -> str:
+        lines = []
+        try:
+            with open(log_path, "r", encoding="utf-8") as f:
+                for raw in f:
+                    raw = raw.rstrip("\r\n")
+                    if not raw.strip():
+                        continue
+                    parts = raw.split("	")
+                    while len(parts) < 3:
+                        parts.append("")
+                    dt_str, qno, result = parts[0], parts[1].strip(), parts[2].strip().upper()
+                    mark = "○" if result == "OK" else ("×" if result == "NG" else result)
+                    lines.append(f"{dt_str}	{qno}	{mark}")
+        except Exception:
+            return ""
+        return "\n".join(lines)
+
+    def show_progress_log(self) -> None:
+        try:
+            log_path = self._get_progress_log_path()
+            if not self._has_progress_log():
+                self.update_top_info()
+                return
+
+            sheet_name = str(self.source_sheet or "")
+            body = self._format_progress_log_text(log_path)
+            if not body.strip():
+                body = "(ログはありますが、表示できる内容がありません)"
+
+            win = tk.Toplevel(self)
+            win.title(f"進捗ログ - {sheet_name}")
+            try:
+                win.transient(self)
+            except Exception:
+                pass
+            win.geometry("900x600")
+            win.minsize(640, 360)
+
+            info_frame = tk.Frame(win)
+            info_frame.pack(fill="x", padx=12, pady=(12, 4))
+
+            tk.Label(info_frame, text=f"シート: {sheet_name}", anchor="w").pack(fill="x")
+            tk.Label(info_frame, text=f"ファイル: {log_path}", anchor="w").pack(fill="x", pady=(4, 0))
+            tk.Label(info_frame, text="日時	設問No	結果", anchor="w").pack(fill="x", pady=(8, 0))
+
+            text_frame = tk.Frame(win)
+            text_frame.pack(fill="both", expand=True, padx=12, pady=(4, 12))
+            text_frame.grid_rowconfigure(0, weight=1)
+            text_frame.grid_columnconfigure(0, weight=1)
+
+            y_scroll = tk.Scrollbar(text_frame, orient="vertical")
+            y_scroll.grid(row=0, column=1, sticky="ns")
+
+            x_scroll = tk.Scrollbar(text_frame, orient="horizontal")
+            x_scroll.grid(row=1, column=0, sticky="ew")
+
+            txt = tk.Text(
+                text_frame,
+                wrap="none",
+                font=("Consolas", 11),
+                yscrollcommand=y_scroll.set,
+                xscrollcommand=x_scroll.set,
+            )
+            txt.grid(row=0, column=0, sticky="nsew")
+            y_scroll.config(command=txt.yview)
+            x_scroll.config(command=txt.xview)
+
+            txt.insert("1.0", body)
+            txt.configure(state="disabled")
+            txt.focus_set()
+        except Exception as e:
+            messagebox.showerror("エラー", f"進捗ログ表示に失敗しました。\n{e}")
+
+    def reset_progress_log(self) -> None:
+        try:
+            log_path = self._get_progress_log_path()
+            if not self._has_progress_log():
+                self.update_top_info()
+                return
+
+            sheet_name = str(self.source_sheet or "")
+            ok = messagebox.askyesno(
+                "確認",
+                f"シート『{sheet_name}』の進捗をリセットします。\n\n回答進捗 / 正解進捗 が 0 に戻ります。\nよろしいですか？"
+            )
+            if not ok:
+                return
+
+            try:
+                os.remove(log_path)
+            except FileNotFoundError:
+                pass
+            except Exception:
+                with open(log_path, "w", encoding="utf-8"):
+                    pass
+
+            self.update_top_info()
+            messagebox.showinfo("完了", f"シート『{sheet_name}』の進捗をリセットしました。")
+        except Exception as e:
+            messagebox.showerror("エラー", f"進捗リセットに失敗しました。\n{e}")
 
     def upsert_progress_log(self, is_ok: bool) -> None:
         """F1判定時の最新結果を、設問Noキーで上書き保存する。"""
