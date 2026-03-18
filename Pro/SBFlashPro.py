@@ -1,6 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-SBFlashPro.py (stable build v0.18)
+SBFlashPro.py (stable build v0.21)
+
+v0.21 変更点
+- 回答シートの列構成を簡素化
+- C列に judge（○/×）を追加
+- 画像系 / 解説 / 語呂 / タグ / 検索キーワードは回答シートへ保存しない
+- 旧回答シート形式も読込互換を維持
+- 進捗率計算は従来通り logs/<sheet>.log ベースのまま変更なし
+
+v0.20 変更点
+- 「正解にする(F10)」「不正解にする(F11)」の制限設定を SBFlashFunctions.py に外だし
+- ボタン表示可否 / ショートカット可否 / F1判定後のみ許可 を切替可能
+- Lite化に向けて、自己採点機能を機能定義ファイルで制御可能に変更
 
 v0.18 変更点
 - 上部バーに「進捗ログ」ボタンを追加
@@ -56,13 +68,15 @@ from tkinter import messagebox, ttk
 
 from PIL import Image, ImageTk
 
+import SBFlashFunctions as funcs
+
 
 DEFAULT_INI = "SBFlashPro.ini"
 
 # =====================================
 # SBFlash Pro Version (on-code)
 # =====================================
-APP_VERSION = "0.18"
+APP_VERSION = "0.21"
 
 # =====================================
 # SBKnowledgeData Layout (0 origin)
@@ -406,25 +420,93 @@ def load_cards(excel_path: str, sheet_name: str, data_start_row: int = DATA_STAR
     return cards
 
 
-# v0.08: consecutive_ok 追加
+# v0.21: 回答シートをシンプル化
 WRONG_COLUMNS = [
     "source_sheet",
     "question_no",
+    "judge",
     "question",
     "answer",
-    "question_image_path",
-    "answer_image_path",
-    "image_path",
-    "explanation",
-    "mnemonic",
     "subject",
-    "tags",
-    "keywords",
     "mistakes",
     "consecutive_ok",
     "last_miss",
     "last_ok",
 ]
+
+WRONG_TITLES_JA = {
+    "source_sheet": "シート名",
+    "question_no": "No.",
+    "judge": "判定",
+    "question": "問題",
+    "answer": "正解",
+    "subject": "科目名",
+    "mistakes": "間違い回数",
+    "consecutive_ok": "連続正解回数",
+    "last_miss": "最終不正解日",
+    "last_ok": "最終正解日",
+}
+
+
+
+
+def _normalize_wrong_df(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    回答シートの旧形式/新形式を吸収して、v0.21 の列構成へ正規化する。
+    """
+    if df is None:
+        df = pd.DataFrame()
+
+    # 旧列名互換
+    if "question_no" not in df.columns and "no" in df.columns:
+        df = df.rename(columns={"no": "question_no"})
+
+    for col in WRONG_COLUMNS:
+        if col not in df.columns:
+            df[col] = None
+
+    # judge は旧形式には存在しないので、最終更新日時から推定
+    if "judge" not in df.columns or df["judge"].isna().all():
+        def _infer_judge(row):
+            raw = str(row.get("judge", "") or "").strip()
+            if raw in ("○", "〇", "o", "O"):
+                return "○"
+            if raw in ("×", "✕", "✖", "x", "X"):
+                return "×"
+
+            last_ok = str(row.get("last_ok", "") or "").strip()
+            last_miss = str(row.get("last_miss", "") or "").strip()
+            if last_ok and not last_miss:
+                return "○"
+            if last_miss and not last_ok:
+                return "×"
+            if last_ok and last_miss:
+                return "○" if last_ok >= last_miss else "×"
+            return ""
+
+        df["judge"] = df.apply(_infer_judge, axis=1)
+
+    df = df[WRONG_COLUMNS].copy()
+
+    df["source_sheet"] = df["source_sheet"].fillna("").astype(str).str.strip()
+    df["question_no"] = df["question_no"].fillna("").astype(str).str.strip()
+    df["judge"] = df["judge"].fillna("").astype(str).str.strip().replace({
+        "〇": "○", "o": "○", "O": "○",
+        "x": "×", "X": "×", "✕": "×", "✖": "×",
+    })
+
+    def _to_int(x, default=0):
+        try:
+            if pd.isna(x) or x is None or str(x).strip() == "":
+                return default
+            return int(float(x))
+        except Exception:
+            return default
+
+    df["mistakes"] = df["mistakes"].apply(lambda v: _to_int(v, 0))
+    df["consecutive_ok"] = df["consecutive_ok"].apply(lambda v: _to_int(v, 0))
+
+    return df
 
 
 def read_wrong_all(excel_path: str, wrong_sheet_name: str, wrong_start_row: int = WRONG_START_ROW) -> pd.DataFrame:
@@ -438,36 +520,7 @@ def read_wrong_all(excel_path: str, wrong_sheet_name: str, wrong_start_row: int 
     except Exception:
         df = pd.DataFrame(columns=WRONG_COLUMNS)
 
-    # 旧列名互換
-    if "question_no" not in df.columns and "no" in df.columns:
-        df = df.rename(columns={"no": "question_no"})
-
-    if "answer_image_path" not in df.columns and "image_path" in df.columns:
-        df["answer_image_path"] = df["image_path"]
-    if "question_image_path" not in df.columns:
-        df["question_image_path"] = None
-
-    for col in WRONG_COLUMNS:
-        if col not in df.columns:
-            df[col] = None
-    df = df[WRONG_COLUMNS].copy()
-
-    df["source_sheet"] = df["source_sheet"].fillna("").astype(str).str.strip()
-    df["question_no"] = df["question_no"].fillna("").astype(str).str.strip()
-
-    # 数値列の補正
-    def _to_int(x, default=0):
-        try:
-            if pd.isna(x) or x is None or str(x).strip() == "":
-                return default
-            return int(float(x))
-        except Exception:
-            return default
-
-    df["mistakes"] = df["mistakes"].apply(lambda v: _to_int(v, 0))
-    df["consecutive_ok"] = df["consecutive_ok"].apply(lambda v: _to_int(v, 0))
-
-    return df
+    return _normalize_wrong_df(df)
 
 
 def write_wrong_sheet(
@@ -510,9 +563,12 @@ def write_wrong_sheet(
     for j, col_name in enumerate(WRONG_COLUMNS, start=1):
         ws.cell(row=1, column=j, value=col_name)
 
-    # 2行目: 日本語タイトル（既存があれば維持）
-    for j, _ in enumerate(WRONG_COLUMNS, start=1):
-        ws.cell(row=title_row, column=j, value=existing_title[j - 1])
+    # 2行目: 日本語タイトル（既存があれば維持、無ければ既定値）
+    for j, col_name in enumerate(WRONG_COLUMNS, start=1):
+        title_value = existing_title[j - 1]
+        if title_value is None or str(title_value).strip() == "":
+            title_value = WRONG_TITLES_JA.get(col_name, "")
+        ws.cell(row=title_row, column=j, value=title_value)
 
     # 既存データ部分を値だけクリア
     max_row = ws.max_row
@@ -563,8 +619,8 @@ def upsert_answer_log(
 ):
     """
     主キー: (source_sheet, question_no)
-    - 正解保存: consecutive_ok += 1, last_ok 更新（mistakesは増やさない）
-    - 不正解保存: mistakes += 1, consecutive_ok = 0, last_miss 更新
+    - 正解保存: judge=○, consecutive_ok += 1, last_ok 更新（mistakesは増やさない）
+    - 不正解保存: judge=×, mistakes += 1, consecutive_ok = 0, last_miss 更新
     """
     df = read_wrong_all(excel_path, wrong_sheet_name, wrong_start_row=wrong_start_row)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -576,9 +632,6 @@ def upsert_answer_log(
     if not qno:
         raise ValueError("question_no が空です（保存できません）")
 
-    tags_str = ",".join(tags_list or [])
-    kw_str = ",".join(keywords_list or [])
-
     hit = (df["source_sheet"].apply(sheet_key) == sheet_key(src)) & (df["question_no"] == qno)
 
     if hit.any():
@@ -589,22 +642,17 @@ def upsert_answer_log(
         df.at[idx, "question_no"] = qno
         df.at[idx, "question"] = q
         df.at[idx, "answer"] = a
-        df.at[idx, "question_image_path"] = question_image_path
-        df.at[idx, "answer_image_path"] = answer_image_path
-        df.at[idx, "image_path"] = answer_image_path or image_path
-        df.at[idx, "explanation"] = explanation
-        df.at[idx, "mnemonic"] = mnemonic
         df.at[idx, "subject"] = subject
-        df.at[idx, "tags"] = tags_str
-        df.at[idx, "keywords"] = kw_str
 
         cur_m = int(df.at[idx, "mistakes"]) if str(df.at[idx, "mistakes"]).strip() != "" else 0
         cur_ok = int(df.at[idx, "consecutive_ok"]) if str(df.at[idx, "consecutive_ok"]).strip() != "" else 0
 
         if is_ok:
+            df.at[idx, "judge"] = "○"
             df.at[idx, "consecutive_ok"] = cur_ok + 1
             df.at[idx, "last_ok"] = now
         else:
+            df.at[idx, "judge"] = "×"
             df.at[idx, "mistakes"] = cur_m + 1
             df.at[idx, "consecutive_ok"] = 0
             df.at[idx, "last_miss"] = now
@@ -613,16 +661,10 @@ def upsert_answer_log(
         df = pd.concat([df, pd.DataFrame([{
             "source_sheet": src,
             "question_no": qno,
+            "judge": ("○" if is_ok else "×"),
             "question": q,
             "answer": a,
-            "question_image_path": question_image_path,
-            "answer_image_path": answer_image_path,
-            "image_path": answer_image_path or image_path,
-            "explanation": explanation,
-            "mnemonic": mnemonic,
             "subject": subject,
-            "tags": tags_str,
-            "keywords": kw_str,
             "mistakes": (0 if is_ok else 1),
             "consecutive_ok": (1 if is_ok else 0),
             "last_miss": (now if not is_ok else ""),
@@ -1103,8 +1145,10 @@ class FlashcardsApp(tk.Tk):
         self.prev_btn.pack(side="left", padx=(16, 0))
         self.next_btn.pack(side="left", padx=(8, 0))
         self.bookmark_next_btn.pack(side="left", padx=(16, 0))
-        self.self_ok_btn.pack(side="left", padx=(16, 0))
-        self.self_ng_btn.pack(side="left", padx=(8, 0))
+        if bool(getattr(funcs, "USE_SELF_GRADE_CORRECT", True)):
+            self.self_ok_btn.pack(side="left", padx=(16, 0))
+        if bool(getattr(funcs, "USE_SELF_GRADE_INCORRECT", True)):
+            self.self_ng_btn.pack(side="left", padx=(8, 0))
         self.exit_btn.pack(side="right")
 
         # ---------- 下段：結果 + 正解/解説（スクロール） + 画像 ----------
@@ -1195,8 +1239,8 @@ class FlashcardsApp(tk.Tk):
         self.bind_all("<F8>", lambda e: _safe_invoke(self.next_btn))
         self.bind_all("<F9>", lambda e: self._safe_goto_next_bookmark())
         # v0.09: 自己採点
-        self.bind_all("<F10>", lambda e: self.self_grade(True))
-        self.bind_all("<F11>", lambda e: self.self_grade(False))
+        self.bind_all("<F10>", lambda e: self._handle_self_grade_hotkey(True))
+        self.bind_all("<F11>", lambda e: self._handle_self_grade_hotkey(False))
         self.bind_all("<Escape>", lambda e: _safe_invoke(self.exit_btn))
 
         self.random_mode = bool(initial_random_mode)
@@ -1326,6 +1370,41 @@ class FlashcardsApp(tk.Tk):
         except Exception:
             pass
 
+
+    def _can_self_grade(self, is_ok: bool) -> tuple[bool, str]:
+        try:
+            if is_ok:
+                if not bool(getattr(funcs, "USE_SELF_GRADE_CORRECT", True)):
+                    return False, "この版では「正解にする」は使用できません。"
+            else:
+                if not bool(getattr(funcs, "USE_SELF_GRADE_INCORRECT", True)):
+                    return False, "この版では「不正解にする」は使用できません。"
+            return True, ""
+        except Exception:
+            return False, "自己採点機能の状態確認に失敗しました。"
+
+    def _update_self_grade_buttons(self) -> None:
+        try:
+            allow_ok, _ = self._can_self_grade(True)
+            allow_ng, _ = self._can_self_grade(False)
+
+            show_ok = bool(getattr(funcs, "USE_SELF_GRADE_CORRECT", True)) and allow_ok
+            show_ng = bool(getattr(funcs, "USE_SELF_GRADE_INCORRECT", True)) and allow_ng
+
+            if hasattr(self, "self_ok_btn"):
+                if show_ok:
+                    self.self_ok_btn.pack(side="left", padx=(16, 0))
+                else:
+                    self.self_ok_btn.pack_forget()
+
+            if hasattr(self, "self_ng_btn"):
+                if show_ng:
+                    self.self_ng_btn.pack(side="left", padx=(8, 0))
+                else:
+                    self.self_ng_btn.pack_forget()
+        except Exception:
+            pass
+
     def current(self):
         return self.cards[self.index]
 
@@ -1336,6 +1415,7 @@ class FlashcardsApp(tk.Tk):
             if hasattr(self, "ox_var"):
                 self.ox_var.set(symbol)
             self.answer_text.focus_set()
+            self._update_self_grade_buttons()
         except Exception:
             pass
 
@@ -1350,6 +1430,7 @@ class FlashcardsApp(tk.Tk):
         self._checked_this_card = False
         self._last_is_ok = None
         self._update_lower_mode_badge()
+        self._update_self_grade_buttons()
         self.answer_text.focus_set()
 
     def update_nav_buttons(self):
@@ -1480,6 +1561,7 @@ class FlashcardsApp(tk.Tk):
         self._update_lower_mode_badge()
         self.update_bookmark_ui()
         self.clear_answer_area()
+        self._update_self_grade_buttons()
 
     # ---------------- Sheet change ----------------
     def _update_window_title(self) -> None:
@@ -1634,16 +1716,15 @@ class FlashcardsApp(tk.Tk):
     # ==================================================
     def self_grade(self, is_ok: bool) -> None:
         try:
+            allowed, reason = self._can_self_grade(is_ok)
+            if not allowed:
+                messagebox.showinfo("制限", reason)
+                self._update_self_grade_buttons()
+                return
+
             item = self.current()
 
             self._last_is_ok = bool(is_ok)
-            if not getattr(self, "_checked_this_card", False):
-                if is_ok:
-                    self.correct_count += 1
-                else:
-                    self.wrong_count += 1
-                self._checked_this_card = True
-                self.update_top_info()
 
             if is_ok:
                 self.result_label.configure(text=self._build_result_message(True, self_graded=True))
@@ -1653,6 +1734,8 @@ class FlashcardsApp(tk.Tk):
             # 下段（正解/解説）を更新し、画像も表示
             self._refresh_lower_text()
             self._show_answer_image(item)
+            self._update_lower_mode_badge()
+            self._update_self_grade_buttons()
         except Exception:
             # 自己採点で落ちない（ループ地獄回避）
             pass
@@ -2190,6 +2273,19 @@ class FlashcardsApp(tk.Tk):
     def _safe_goto_next_bookmark(self):
         try:
             self.goto_next_bookmark()
+        except Exception:
+            pass
+
+
+    def _handle_self_grade_hotkey(self, is_ok: bool) -> None:
+        try:
+            if is_ok:
+                if not bool(getattr(funcs, "USE_SELF_GRADE_CORRECT", True)):
+                    return
+            else:
+                if not bool(getattr(funcs, "USE_SELF_GRADE_INCORRECT", True)):
+                    return
+            self.self_grade(is_ok)
         except Exception:
             pass
 
