@@ -76,7 +76,7 @@ DEFAULT_INI = "SBFlashPro.ini"
 # =====================================
 # SBFlash Pro Version (on-code)
 # =====================================
-APP_VERSION = "0.21"
+APP_VERSION = "0.21a"
 
 # =====================================
 # SBKnowledgeData Layout (0 origin)
@@ -1092,7 +1092,6 @@ class FlashcardsApp(tk.Tk):
 
         self.ox_var = tk.StringVar(value="")
         self.ox_frame = tk.Frame(self.answer_row)
-        self.ox_frame.pack(side="left", padx=(10, 0))
 
         self.btn_o = tk.Button(
             self.ox_frame,
@@ -1137,19 +1136,8 @@ class FlashcardsApp(tk.Tk):
         self.bookmark_next_btn = tk.Button(self.action_frame, text="次のしおり(F9)", command=self.goto_next_bookmark)
         self.exit_btn = tk.Button(self.action_frame, text="終了(ESC)", command=self.destroy)
 
-        self.check_btn.pack(side="left")
-        self.toggle_answer_explain_btn.pack(side="left", padx=(8, 0))
-        self.save_answer_btn.pack(side="left", padx=(8, 0))
-        self.bookmark_set_btn.pack(side="left", padx=(16, 0))
-        self.bookmark_clear_btn.pack(side="left", padx=(8, 0))
-        self.prev_btn.pack(side="left", padx=(16, 0))
-        self.next_btn.pack(side="left", padx=(8, 0))
-        self.bookmark_next_btn.pack(side="left", padx=(16, 0))
-        if bool(getattr(funcs, "USE_SELF_GRADE_CORRECT", True)):
-            self.self_ok_btn.pack(side="left", padx=(16, 0))
-        if bool(getattr(funcs, "USE_SELF_GRADE_INCORRECT", True)):
-            self.self_ng_btn.pack(side="left", padx=(8, 0))
         self.exit_btn.pack(side="right")
+        self._apply_function_button_visibility()
 
         # ---------- 下段：結果 + 正解/解説（スクロール） + 画像 ----------
         self.bottom_frame = tk.Frame(self.left_frame)
@@ -1232,12 +1220,12 @@ class FlashcardsApp(tk.Tk):
 
         self.bind_all("<F1>", lambda e: _safe_invoke(self.check_btn))
         self.bind_all("<F2>", lambda e: _safe_invoke(self.toggle_answer_explain_btn))
-        self.bind_all("<F3>", lambda e: _safe_invoke(self.save_answer_btn))
-        self.bind_all("<F5>", lambda e: _safe_invoke(self.bookmark_set_btn))
-        self.bind_all("<F6>", lambda e: _safe_invoke(self.bookmark_clear_btn))
+        self.bind_all("<F3>", lambda e: self._handle_save_answer_hotkey())
+        self.bind_all("<F5>", lambda e: self._handle_toggle_bookmark_hotkey())
+        self.bind_all("<F6>", lambda e: self._handle_clear_bookmarks_hotkey())
         self.bind_all("<F7>", lambda e: _safe_invoke(self.prev_btn))
         self.bind_all("<F8>", lambda e: _safe_invoke(self.next_btn))
-        self.bind_all("<F9>", lambda e: self._safe_goto_next_bookmark())
+        self.bind_all("<F9>", lambda e: self._handle_next_bookmark_hotkey())
         # v0.09: 自己採点
         self.bind_all("<F10>", lambda e: self._handle_self_grade_hotkey(True))
         self.bind_all("<F11>", lambda e: self._handle_self_grade_hotkey(False))
@@ -1371,6 +1359,108 @@ class FlashcardsApp(tk.Tk):
             pass
 
 
+    def _is_feature_enabled(self, feature_name: str, default: bool = True) -> bool:
+        try:
+            return bool(getattr(funcs, feature_name, default))
+        except Exception:
+            return default
+
+    def _can_use_ox_buttons(self) -> bool:
+        return self._is_feature_enabled("USE_OX_BUTTONS", True)
+
+    def _can_save_answer(self) -> bool:
+        return self._is_feature_enabled("USE_SAVE_ANSWER", True)
+
+    def _can_toggle_bookmark(self) -> bool:
+        return self._is_feature_enabled("USE_BOOKMARK_TOGGLE", True)
+
+    def _can_clear_all_bookmarks(self) -> bool:
+        return self._is_feature_enabled("USE_BOOKMARK_CLEAR_ALL", True)
+
+    def _can_goto_next_bookmark(self) -> bool:
+        return self._is_feature_enabled("USE_BOOKMARK_NEXT", True)
+
+    def _can_use_topic_review(self) -> bool:
+        return self._is_feature_enabled("USE_TOPIC_REVIEW", True)
+
+    def _pack_button_safe(self, button: tk.Button, *, side: str, padx=(0, 0)) -> None:
+        try:
+            if not button.winfo_manager():
+                button.pack(side=side, padx=padx)
+        except Exception:
+            pass
+
+    def _forget_button_safe(self, button: tk.Button) -> None:
+        try:
+            if button.winfo_manager() == "pack":
+                button.pack_forget()
+        except Exception:
+            pass
+
+    def _apply_function_button_visibility(self) -> None:
+        try:
+            # 左側ボタン群は pack 順で表示位置が決まるため、毎回並べ直す。
+            left_widgets = [
+                getattr(self, "check_btn", None),
+                getattr(self, "toggle_answer_explain_btn", None),
+                getattr(self, "save_answer_btn", None),
+                getattr(self, "bookmark_set_btn", None),
+                getattr(self, "bookmark_clear_btn", None),
+                getattr(self, "prev_btn", None),
+                getattr(self, "next_btn", None),
+                getattr(self, "bookmark_next_btn", None),
+                getattr(self, "self_ok_btn", None),
+                getattr(self, "self_ng_btn", None),
+                getattr(self, "ox_frame", None),
+                getattr(self, "topic_btn", None),
+                getattr(self, "topic_label", None),
+            ]
+            for w in left_widgets:
+                try:
+                    if w and w.winfo_manager() == "pack":
+                        w.pack_forget()
+                except Exception:
+                    pass
+
+            self._pack_button_safe(self.check_btn, side="left", padx=(0, 0))
+            self._pack_button_safe(self.toggle_answer_explain_btn, side="left", padx=(8, 0))
+
+            show_save = self._can_save_answer()
+            show_bm_toggle = self._can_toggle_bookmark()
+            show_bm_clear = self._can_clear_all_bookmarks()
+            show_bm_next = self._can_goto_next_bookmark()
+            show_ox = self._can_use_ox_buttons()
+            show_topic_review = self._can_use_topic_review()
+            show_self_ok = bool(getattr(funcs, "USE_SELF_GRADE_CORRECT", True))
+            show_self_ng = bool(getattr(funcs, "USE_SELF_GRADE_INCORRECT", True))
+
+            if show_save:
+                self._pack_button_safe(self.save_answer_btn, side="left", padx=(8, 0))
+            if show_bm_toggle:
+                self._pack_button_safe(self.bookmark_set_btn, side="left", padx=((16 if not show_save else 8), 0))
+            if show_bm_clear:
+                self._pack_button_safe(self.bookmark_clear_btn, side="left", padx=((16 if not (show_save or show_bm_toggle) else 8), 0))
+
+            # 前問題/次問題は、保存・しおり系があるときはその直後、ないときは F2 の直後に詰める。
+            prev_pad = (16 if (show_save or show_bm_toggle or show_bm_clear) else 16, 0)
+            self._pack_button_safe(self.prev_btn, side="left", padx=prev_pad)
+            self._pack_button_safe(self.next_btn, side="left", padx=(8, 0))
+
+            if show_bm_next:
+                self._pack_button_safe(self.bookmark_next_btn, side="left", padx=(16, 0))
+
+            if show_self_ok:
+                self._pack_button_safe(self.self_ok_btn, side="left", padx=(16, 0))
+            if show_self_ng:
+                self._pack_button_safe(self.self_ng_btn, side="left", padx=(8, 0))
+            if show_ox:
+                self._pack_button_safe(self.ox_frame, side="left", padx=(10, 0))
+            if show_topic_review:
+                self._pack_button_safe(self.topic_btn, side="left", padx=(16, 0))
+                self._pack_button_safe(self.topic_label, side="left", padx=(8, 0))
+        except Exception:
+            pass
+
     def _can_self_grade(self, is_ok: bool) -> tuple[bool, str]:
         try:
             if is_ok:
@@ -1409,6 +1499,8 @@ class FlashcardsApp(tk.Tk):
         return self.cards[self.index]
 
     def set_answer_symbol(self, symbol: str):
+        if not self._can_use_ox_buttons():
+            return
         try:
             self.answer_text.delete("1.0", "end")
             self.answer_text.insert("1.0", symbol)
@@ -1416,6 +1508,7 @@ class FlashcardsApp(tk.Tk):
                 self.ox_var.set(symbol)
             self.answer_text.focus_set()
             self._update_self_grade_buttons()
+            self._apply_function_button_visibility()
         except Exception:
             pass
 
@@ -1431,6 +1524,7 @@ class FlashcardsApp(tk.Tk):
         self._last_is_ok = None
         self._update_lower_mode_badge()
         self._update_self_grade_buttons()
+        self._apply_function_button_visibility()
         self.answer_text.focus_set()
 
     def update_nav_buttons(self):
@@ -1452,6 +1546,11 @@ class FlashcardsApp(tk.Tk):
     def _update_topic_button_state(self) -> None:
         try:
             if not hasattr(self, "topic_btn"):
+                return
+            if not self._can_use_topic_review():
+                self.topic_btn.configure(text="論点復習", state="disabled")
+                if hasattr(self, "topic_label"):
+                    self.topic_label.configure(text="")
                 return
 
             button_text = "論点復習"
@@ -1560,6 +1659,7 @@ class FlashcardsApp(tk.Tk):
         self.update_top_info()
         self._update_lower_mode_badge()
         self.update_bookmark_ui()
+        self._apply_function_button_visibility()
         self.clear_answer_area()
         self._update_self_grade_buttons()
 
@@ -1815,6 +1915,8 @@ class FlashcardsApp(tk.Tk):
 
     def save_answer_log(self):
         """F3: 回答保存（F1判定後のみ）"""
+        if not self._can_save_answer():
+            return
         if not self._checked_this_card or self._last_is_ok is None:
             messagebox.showinfo("情報", "先に「回答(F1)」で判定してください（保存は判定後のみ）。")
             return
@@ -1867,6 +1969,9 @@ class FlashcardsApp(tk.Tk):
 
     # ---------------- Filter by tag ----------------
     def filter_by_current_topic(self):
+        if not self._can_use_topic_review():
+            return
+
         if self.topic_tag:
             self.filtered_cards = self.all_cards[:]
             self.topic_tag = None
@@ -2027,12 +2132,15 @@ class FlashcardsApp(tk.Tk):
     def update_bookmark_ui(self) -> None:
         try:
             has_any = len(self._current_bookmark_list()) > 0
-            self.bookmark_set_btn.configure(state="normal")
-            self.bookmark_clear_btn.configure(state=("normal" if has_any else "disabled"))
+            self.bookmark_set_btn.configure(state=("normal" if self._can_toggle_bookmark() else "disabled"))
+            self.bookmark_clear_btn.configure(state=("normal" if self._can_clear_all_bookmarks() and has_any else "disabled"))
+            self.bookmark_next_btn.configure(state=("normal" if self._can_goto_next_bookmark() and has_any else "disabled"))
         except Exception:
             pass
 
     def toggle_bookmark(self) -> None:
+        if not self._can_toggle_bookmark():
+            return
         try:
             key = self._shiori_key()
             bm = self.shiori_data.setdefault("bookmarks", {}).setdefault(key, [])
@@ -2052,6 +2160,8 @@ class FlashcardsApp(tk.Tk):
         self.update_bookmark_ui()
 
     def clear_all_bookmarks(self) -> None:
+        if not self._can_clear_all_bookmarks():
+            return
         try:
             key = self._shiori_key()
             if key in self.shiori_data.get("bookmarks", {}):
@@ -2065,6 +2175,8 @@ class FlashcardsApp(tk.Tk):
         self.update_bookmark_ui()
 
     def goto_next_bookmark(self) -> None:
+        if not self._can_goto_next_bookmark():
+            return
         try:
             bms = self._current_bookmark_list()
             if not bms:
@@ -2269,6 +2381,38 @@ class FlashcardsApp(tk.Tk):
             # log書き込み失敗で本体を落とさない
             pass
 
+
+    def _handle_save_answer_hotkey(self):
+        try:
+            if not self._can_save_answer():
+                return
+            self.save_answer_log()
+        except Exception:
+            pass
+
+    def _handle_toggle_bookmark_hotkey(self):
+        try:
+            if not self._can_toggle_bookmark():
+                return
+            self.toggle_bookmark()
+        except Exception:
+            pass
+
+    def _handle_clear_bookmarks_hotkey(self):
+        try:
+            if not self._can_clear_all_bookmarks():
+                return
+            self.clear_all_bookmarks()
+        except Exception:
+            pass
+
+    def _handle_next_bookmark_hotkey(self):
+        try:
+            if not self._can_goto_next_bookmark():
+                return
+            self.goto_next_bookmark()
+        except Exception:
+            pass
 
     def _safe_goto_next_bookmark(self):
         try:
