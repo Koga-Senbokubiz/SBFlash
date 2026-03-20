@@ -1,6 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-SBFlashPro.py (stable build v0.21)
+SBFlashPro.py (stable build v0.22c)
+
+v0.22c 変更点
+- F2トグルから語呂合せを外し、正解/解説のみを切替
+
+v0.22 変更点
+- 進捗ログに設問先頭20文字を追加
+- 21文字以上は「20文字＋…」で省略
+- 進捗ログ表示でも設問先頭文字列を表示
+- 進捗ログ表示の設問20文字を通常UIフォントで表示
 
 v0.21 変更点
 - 回答シートの列構成を簡素化
@@ -76,7 +85,7 @@ DEFAULT_INI = "SBFlashPro.ini"
 # =====================================
 # SBFlash Pro Version (on-code)
 # =====================================
-APP_VERSION = "0.21a"
+APP_VERSION = "0.22c"
 
 # =====================================
 # SBKnowledgeData Layout (0 origin)
@@ -104,6 +113,20 @@ def _base_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent
+
+
+def get_question_short(text, max_len: int = 20) -> str:
+    """ログ/結果表示用の設問短縮文字列を返す。21文字以上は20文字＋…"""
+    try:
+        if text is None:
+            return ""
+        clean = str(text).replace("\r", " ").replace("\n", " ").replace("\t", " ").strip()
+        clean = re.sub(r"\s+", " ", clean)
+        if len(clean) <= max_len:
+            return clean
+        return clean[:max_len] + "…"
+    except Exception:
+        return ""
 
 
 def _create_default_ini(path: Path) -> None:
@@ -1263,16 +1286,12 @@ class FlashcardsApp(tk.Tk):
         modes = ["answer"]
         if has_trim_value(item.get("explanation", "")):
             modes.append("explain")
-        if has_trim_value(item.get("mnemonic", "")):
-            modes.append("mnemonic")
         return modes
 
     def _build_f2_button_label(self, item: dict) -> str:
         labels = ["設問" if self.reverse_mode else "正解"]
         if has_trim_value(item.get("explanation", "")):
             labels.append("解説")
-        if has_trim_value(item.get("mnemonic", "")):
-            labels.append("語呂合せ")
         return "/".join(labels) + "(F2)"
 
     def _apply_current_f2_label(self) -> None:
@@ -2238,11 +2257,14 @@ class FlashcardsApp(tk.Tk):
                     if not raw.strip():
                         continue
                     parts = raw.split("	")
-                    while len(parts) < 3:
+                    while len(parts) < 4:
                         parts.append("")
-                    dt_str, qno, result = parts[0], parts[1].strip(), parts[2].strip().upper()
+                    dt_str = parts[0]
+                    qno = parts[1].strip()
+                    result = parts[2].strip().upper()
+                    question_short = parts[3].strip()
                     mark = "○" if result == "OK" else ("×" if result == "NG" else result)
-                    lines.append(f"{dt_str}	{qno}	{mark}")
+                    lines.append(f"{dt_str}	{qno}	{mark}	{question_short}")
         except Exception:
             return ""
         return "\n".join(lines)
@@ -2273,7 +2295,7 @@ class FlashcardsApp(tk.Tk):
 
             tk.Label(info_frame, text=f"シート: {sheet_name}", anchor="w").pack(fill="x")
             tk.Label(info_frame, text=f"ファイル: {log_path}", anchor="w").pack(fill="x", pady=(4, 0))
-            tk.Label(info_frame, text="日時	設問No	結果", anchor="w").pack(fill="x", pady=(8, 0))
+            tk.Label(info_frame, text="日時\t設問No\t結果\t設問先頭20文字", anchor="w").pack(fill="x", pady=(8, 0))
 
             text_frame = tk.Frame(win)
             text_frame.pack(fill="both", expand=True, padx=12, pady=(4, 12))
@@ -2289,7 +2311,7 @@ class FlashcardsApp(tk.Tk):
             txt = tk.Text(
                 text_frame,
                 wrap="none",
-                font=("Consolas", 11),
+                font=("Yu Gothic UI", 11),
                 yscrollcommand=y_scroll.set,
                 xscrollcommand=x_scroll.set,
             )
@@ -2341,6 +2363,7 @@ class FlashcardsApp(tk.Tk):
 
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             result = "OK" if is_ok else "NG"
+            question_short = get_question_short(item.get("question", ""), 20)
             log_path = self._get_progress_log_path()
 
             rows = []
@@ -2353,18 +2376,21 @@ class FlashcardsApp(tk.Tk):
                         if not line.strip():
                             continue
                         parts = line.split("\t")
-                        while len(parts) < 3:
+                        while len(parts) < 4:
                             parts.append("")
-                        old_dt, old_qno, old_result = parts[0], parts[1], parts[2]
+                        old_dt = parts[0]
+                        old_qno = parts[1]
+                        old_result = parts[2]
+                        old_qshort = parts[3]
 
                         if old_qno == qno:
-                            rows.append([now, qno, result])
+                            rows.append([now, qno, result, question_short])
                             found = True
                         else:
-                            rows.append([old_dt, old_qno, old_result])
+                            rows.append([old_dt, old_qno, old_result, old_qshort])
 
             if not found:
-                rows.append([now, qno, result])
+                rows.append([now, qno, result, question_short])
 
             def sort_key(r):
                 try:
@@ -2375,8 +2401,8 @@ class FlashcardsApp(tk.Tk):
             rows.sort(key=sort_key)
 
             with open(log_path, "w", encoding="utf-8", newline="") as f:
-                for dt_str, no_str, rs in rows:
-                    f.write(f"{dt_str}\t{no_str}\t{rs}\n")
+                for dt_str, no_str, rs, qshort in rows:
+                    f.write(f"{dt_str}\t{no_str}\t{rs}\t{qshort}\n")
         except Exception:
             # log書き込み失敗で本体を落とさない
             pass
