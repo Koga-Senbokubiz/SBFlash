@@ -17,16 +17,16 @@ PRODUCT_EDITION = "Pro"
 # 自己採点機能の一括制御
 # False の場合は、表示・実行・ショートカットをすべて無効化
 # -------------------------------------
-USE_SELF_GRADE_CORRECT = False
-USE_SELF_GRADE_INCORRECT = False
+USE_SELF_GRADE_CORRECT = True
+USE_SELF_GRADE_INCORRECT = True
 
 # -------------------------------------
 # Lite向け外だし対象
 # False の場合は、表示・実行・ショートカットをすべて無効化
 # -------------------------------------
-USE_OX_BUTTONS = False
+USE_OX_BUTTONS = True
 USE_SAVE_ANSWER = False
-USE_BOOKMARK_TOGGLE = False
-USE_BOOKMARK_CLEAR_ALL = False
-USE_BOOKMARK_NEXT = False
-USE_TOPIC_REVIEW = False
+USE_BOOKMARK_TOGGLE = True
+USE_BOOKMARK_CLEAR_ALL = True
+USE_BOOKMARK_NEXT = True
+USE_TOPIC_REVIEW = True
