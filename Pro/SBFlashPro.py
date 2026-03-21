@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-SBFlashPro.py (stable build v0.22c)
+SBFlashPro.py (stable build v0.23)
+
+v0.23 変更点
+- 設問番号ジャンプ機能を追加
+- 起動時およびシート切替時に、前回終了した設問を初期表示
+- 最終表示設問はシート別に FlashCardsLastPosition.dat へ保存
 
 v0.22c 変更点
 - F2トグルから語呂合せを外し、正解/解説のみを切替
@@ -85,7 +90,7 @@ DEFAULT_INI = "SBFlashPro.ini"
 # =====================================
 # SBFlash Pro Version (on-code)
 # =====================================
-APP_VERSION = "0.22c"
+APP_VERSION = "0.23"
 
 # =====================================
 # SBKnowledgeData Layout (0 origin)
@@ -293,6 +298,26 @@ def sheet_key(s: str) -> str:
     t = t.replace("\u3000", " ")
     t = re.sub(r"\s+", "", t)  # 全空白削除
     return t.strip().lower()
+
+
+def normalize_question_no(value: str) -> str:
+    """設問番号比較用。Q002 / q2 / 2 を同一視できるように整形する。"""
+    s = str(value or "").strip()
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFKC", s).strip()
+    m = re.fullmatch(r"(?i)q\s*0*(\d+)", s)
+    if m:
+        return str(int(m.group(1)))
+    if re.fullmatch(r"0*\d+", s):
+        return str(int(s))
+    return s.lower()
+
+
+def question_no_matches(a: str, b: str) -> bool:
+    na = normalize_question_no(a)
+    nb = normalize_question_no(b)
+    return bool(na) and bool(nb) and na == nb
 
 
 def list_question_sheets(excel_path: str, wrong_sheet_name: str = "回答シート") -> list[str]:
@@ -1094,12 +1119,20 @@ class FlashcardsApp(tk.Tk):
 
         self.btn_frame = tk.Frame(self.mid_frame)
         self.btn_frame.grid(row=0, column=0, sticky="w", pady=(0, 8))
+
+        self.jump_var = tk.StringVar()
+        self.jump_entry = tk.Entry(self.btn_frame, textvariable=self.jump_var, width=8)
+        self.jump_entry.pack(side="left")
+        self.jump_entry.bind("<Return>", self.jump_to_question)
+        self.jump_btn = tk.Button(self.btn_frame, text="ジャンプ", command=self.jump_to_question)
+        self.jump_btn.pack(side="left", padx=(8, 0))
+
         self.reverse_btn = tk.Button(
             self.btn_frame,
             text=str(self.ui_settings.get("reverse_label_normal", "解答⇔設問")),
             command=self.toggle_reverse_mode,
         )
-        self.reverse_btn.pack(side="left")
+        self.reverse_btn.pack(side="left", padx=(8, 0))
         self.random_btn = tk.Button(self.btn_frame, text="ランダム出題", command=self.toggle_random_mode)
         self.random_btn.pack(side="left", padx=(8, 0))
         self.topic_btn = tk.Button(self.btn_frame, text="論点復習", command=self.filter_by_current_topic)
@@ -1227,6 +1260,12 @@ class FlashcardsApp(tk.Tk):
         self.shiori_data = self._load_shiori_data()
 
         # ==================================================
+        # 最終表示位置（シート別）
+        # ==================================================
+        self.last_position_path = self._get_last_position_path()
+        self.last_position_data = self._load_last_position_data()
+
+        # ==================================================
         # Key bindings
         # ==================================================
         def _safe_invoke(btn: tk.Button):
@@ -1256,6 +1295,7 @@ class FlashcardsApp(tk.Tk):
 
         self.random_mode = bool(initial_random_mode)
         self._rebuild_cards_view(reset_index=True)
+        self._restore_last_position()
         self._tick_clock()
         self.render()
 
@@ -1670,6 +1710,10 @@ class FlashcardsApp(tk.Tk):
     def render(self):
         item = self.current()
         self._set_current_position(save=True)
+        try:
+            self.jump_var.set(str(item.get("question_no", "") or ""))
+        except Exception:
+            pass
         self.set_text(self.q_text, self._get_display_question(item))
         self._show_question_image(item)
         self.update_nav_buttons()
@@ -1722,6 +1766,7 @@ class FlashcardsApp(tk.Tk):
             self._update_window_title()
 
             self._rebuild_cards_view(reset_index=True)
+            self._restore_last_position()
 
             # 画像索引更新
             self._qimage_map = {}
@@ -2119,6 +2164,113 @@ class FlashcardsApp(tk.Tk):
         except Exception:
             pass
 
+
+    def _get_last_position_path(self) -> str:
+        return os.path.join(self._get_app_dir(), "FlashCardsLastPosition.dat")
+
+    def _last_position_key(self) -> str:
+        return f"{self._normalize_excel_path()}||{self.source_sheet}"
+
+    def _load_last_position_data(self) -> dict:
+        data = {}
+        try:
+            if not os.path.exists(self.last_position_path):
+                return data
+            with open(self.last_position_path, "r", encoding="utf-8", newline="") as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    if not row or len(row) < 4:
+                        continue
+                    excel_path = (row[0] or "").strip()
+                    sheet_name = (row[1] or "").strip()
+                    question_no = (row[2] or "").strip()
+                    updated_at = (row[3] or "").strip()
+                    if not excel_path or not sheet_name or not question_no:
+                        continue
+                    data[f"{excel_path}||{sheet_name}"] = {
+                        "excel_path": excel_path,
+                        "sheet_name": sheet_name,
+                        "question_no": question_no,
+                        "updated_at": updated_at,
+                    }
+        except Exception:
+            return {}
+        return data
+
+    def _save_last_position_data(self) -> None:
+        try:
+            with open(self.last_position_path, "w", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                for key in sorted(self.last_position_data.keys()):
+                    rec = self.last_position_data.get(key, {}) or {}
+                    writer.writerow([
+                        rec.get("excel_path", ""),
+                        rec.get("sheet_name", ""),
+                        rec.get("question_no", ""),
+                        rec.get("updated_at", ""),
+                    ])
+        except Exception:
+            pass
+
+    def _save_last_position(self) -> None:
+        try:
+            item = self.current()
+            qno = str(item.get("question_no", "") or "").strip()
+            if not qno:
+                return
+            self.last_position_data[self._last_position_key()] = {
+                "excel_path": self._normalize_excel_path(),
+                "sheet_name": self.source_sheet,
+                "question_no": qno,
+                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            self._save_last_position_data()
+        except Exception:
+            pass
+
+    def _find_index_by_question_no(self, question_no: str) -> int:
+        target = str(question_no or "").strip()
+        if not target:
+            return -1
+        for i, card in enumerate(self.cards):
+            qno = str(card.get("question_no", "") or "").strip()
+            if question_no_matches(qno, target):
+                return i
+        return -1
+
+    def _restore_last_position(self) -> bool:
+        try:
+            rec = self.last_position_data.get(self._last_position_key())
+            if not rec:
+                return False
+            idx = self._find_index_by_question_no(rec.get("question_no", ""))
+            if idx < 0:
+                return False
+            self.index = idx
+            return True
+        except Exception:
+            return False
+
+    def jump_to_question(self, event=None) -> None:
+        try:
+            raw = self.jump_var.get().strip() if hasattr(self, "jump_var") else ""
+            if not raw:
+                return
+            idx = self._find_index_by_question_no(raw)
+            if idx < 0:
+                messagebox.showinfo("情報", f"設問番号『{raw}』は見つかりません。")
+                return
+            self.index = idx
+            self._checked_this_card = False
+            self._last_is_ok = None
+            self.render()
+            try:
+                self.answer_text.focus_set()
+            except Exception:
+                pass
+        except Exception as e:
+            messagebox.showerror("エラー", str(e))
+
     def _set_current_position(self, save: bool = True) -> None:
         try:
             self.shiori_data["current"] = {
@@ -2128,6 +2280,7 @@ class FlashcardsApp(tk.Tk):
             }
             if save:
                 self._save_shiori_data()
+                self._save_last_position()
         except Exception:
             pass
 
