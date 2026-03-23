@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-SBFlashPro.py (Release Ver1.00)
+SBFlashPro.py (release build Ver1.00)
 
-v0.23 変更点
-- 設問番号ジャンプ機能を追加
-- 起動時およびシート切替時に、前回終了した設問を初期表示
-- 最終表示設問はシート別に FlashCardsLastPosition.dat へ保存
+Ver1.00 変更点
+- リリース版
+- ini関連は DEFAULT_INI_FILENAME のみ SBFlashFunctions.py 参照
+- データ / 起動時既定値 と UI既定値 は従来通り ini 管理
 
 v0.22c 変更点
 - F2トグルから語呂合せを外し、正解/解説のみを切替
@@ -90,7 +90,7 @@ DEFAULT_INI = getattr(funcs, "DEFAULT_INI_FILENAME", "SBFlashPro.ini")
 # =====================================
 # SBFlash Pro Version (on-code)
 # =====================================
-APP_VERSION = getattr(funcs, "APP_VERSION", "Ver1.00")
+APP_VERSION = "Ver1.00"
 
 # =====================================
 # SBKnowledgeData Layout (0 origin)
@@ -135,15 +135,27 @@ def get_question_short(text, max_len: int = 20) -> str:
 
 
 def _create_default_ini(path: Path) -> None:
-    # 機能/版数/標準値は SBFlashFunctions.py を正として、ini には利用者上書きだけを書き出す
+    # exe/pyをダブルクリックしただけで使える“最低限の初期値”
     text = (
-        "[app]\\n"
-        f"app_title={getattr(funcs, 'APP_TITLE', 'SBFlash Pro')}\\n"
-        f"excel_path={getattr(funcs, 'DEFAULT_EXCEL_PATH', 'FlashCards.xlsx')}\\n"
-        f"initial_sheet={getattr(funcs, 'INITIAL_SHEET', 'sheet0')}\\n"
-        f"wrong_sheet={getattr(funcs, 'WRONG_SHEET', '回答シート')}\\n"
-        "\\n"
-        "[ui]\\n"
+        "[app]\n"
+        "app_title=暗記カード\n"
+        "EXCEL_PATH=FlashCards.xlsx\n"
+        "initial_sheet=sheet0\n"
+        "wrong_sheet=回答シート\n"
+        "data_start_row_default=2\n"
+        "wrong_start_row=3\n"
+        "wrong_only=false\n"
+        "worst_first=false\n"
+        "all_subjects=false\n"
+        "\n"
+        "[ui]\n"
+        "auto_ratio=0.90\n"
+        "min_width=820\n"
+        "min_height=620\n"
+        "max_width=2200\n"
+        "max_height=1400\n"
+        "thumb_size=400\n"
+        "zoom_max=1200\n"
     )
     path.write_text(text, encoding="utf-8")
 
@@ -194,7 +206,7 @@ def load_settings() -> dict:
             return default
 
     # excel_path / EXCEL_PATH を受け付ける。相対パスは ini → exe/py → 親フォルダ の順で解決する
-    excel_path_raw = app.get("excel_path", fallback=app.get("EXCEL_PATH", getattr(funcs, "DEFAULT_EXCEL_PATH", "FlashCards.xlsx"))).strip()
+    excel_path_raw = app.get("excel_path", fallback=app.get("EXCEL_PATH", "FlashCards.xlsx")).strip()
     excel_path = Path(excel_path_raw)
     if not excel_path.is_absolute():
         candidates = [
@@ -211,32 +223,32 @@ def load_settings() -> dict:
         excel_path = resolved if resolved is not None else candidates[0]
 
     ui_settings = {
-        "window_width": get_int(ui, "window_width", getattr(funcs, "WINDOW_WIDTH", 0)),
-        "window_height": get_int(ui, "window_height", getattr(funcs, "WINDOW_HEIGHT", 0)),
-        "start_maximized": get_bool(ui, "start_maximized", getattr(funcs, "START_MAXIMIZED", False)),
-        "auto_ratio": get_float(ui, "auto_ratio", getattr(funcs, "AUTO_RATIO", 0.90)),
-        "min_width": get_int(ui, "min_width", getattr(funcs, "MIN_WIDTH", 820)),
-        "min_height": get_int(ui, "min_height", getattr(funcs, "MIN_HEIGHT", 620)),
-        "max_width": get_int(ui, "max_width", getattr(funcs, "MAX_WIDTH", 2200)),
-        "max_height": get_int(ui, "max_height", getattr(funcs, "MAX_HEIGHT", 1400)),
-        "thumb_size": get_int(ui, "thumb_size", getattr(funcs, "THUMB_SIZE", 400)),
-        "zoom_max": get_int(ui, "zoom_max", getattr(funcs, "ZOOM_MAX", 1200)),
-        "reverse_label_normal": (ui.get("reverse_label_normal", fallback=getattr(funcs, "REVERSE_LABEL_NORMAL", "解答⇔設問")) if ui is not None else getattr(funcs, "REVERSE_LABEL_NORMAL", "解答⇔設問")).strip() or getattr(funcs, "REVERSE_LABEL_NORMAL", "解答⇔設問"),
-        "reverse_label_reversed": (ui.get("reverse_label_reversed", fallback=getattr(funcs, "REVERSE_LABEL_REVERSED", "設問⇔解答")) if ui is not None else getattr(funcs, "REVERSE_LABEL_REVERSED", "設問⇔解答")).strip() or getattr(funcs, "REVERSE_LABEL_REVERSED", "設問⇔解答"),
+        "window_width": get_int(ui, "window_width", 0),
+        "window_height": get_int(ui, "window_height", 0),
+        "start_maximized": get_bool(ui, "start_maximized", False),
+        "auto_ratio": get_float(ui, "auto_ratio", 0.90),
+        "min_width": get_int(ui, "min_width", 820),
+        "min_height": get_int(ui, "min_height", 620),
+        "max_width": get_int(ui, "max_width", 2200),
+        "max_height": get_int(ui, "max_height", 1400),
+        "thumb_size": get_int(ui, "thumb_size", 400),
+        "zoom_max": get_int(ui, "zoom_max", 1200),
+        "reverse_label_normal": (ui.get("reverse_label_normal", fallback="解答⇔設問") if ui is not None else "解答⇔設問").strip() or "解答⇔設問",
+        "reverse_label_reversed": (ui.get("reverse_label_reversed", fallback="設問⇔解答") if ui is not None else "設問⇔解答").strip() or "設問⇔解答",
     }
 
     return {
         "ini_path": str(ini_path),
-        "app_title": app.get("app_title", getattr(funcs, "APP_TITLE", "SBFlash Pro")).strip(),
+        "app_title": app.get("app_title", "暗記カード").strip(),
         "app_version": APP_VERSION,
         "EXCEL_PATH": str(excel_path),
-        "initial_sheet": app.get("initial_sheet", getattr(funcs, "INITIAL_SHEET", "sheet0")).strip(),
-        "wrong_sheet": app.get("wrong_sheet", getattr(funcs, "WRONG_SHEET", "回答シート")).strip(),
-        "data_start_row_default": get_int(app, "data_start_row_default", getattr(funcs, "DATA_START_ROW_DEFAULT", DATA_START_ROW_DEFAULT)),
-        "wrong_start_row": get_int(app, "wrong_start_row", getattr(funcs, "WRONG_START_ROW", WRONG_START_ROW)),
-        "wrong_only": get_bool(app, "wrong_only", getattr(funcs, "WRONG_ONLY", False)),
-        "worst_first": get_bool(app, "worst_first", getattr(funcs, "WORST_FIRST", False)),
-        "all_subjects": get_bool(app, "all_subjects", getattr(funcs, "ALL_SUBJECTS", False)),
+        "initial_sheet": app.get("initial_sheet", "sheet0").strip(),
+        "wrong_sheet": app.get("wrong_sheet", "回答シート").strip(),
+        "data_start_row_default": get_int(app, "data_start_row_default", DATA_START_ROW_DEFAULT),
+        "wrong_start_row": get_int(app, "wrong_start_row", WRONG_START_ROW),
+        "wrong_only": get_bool(app, "wrong_only", False),
+        "worst_first": get_bool(app, "worst_first", False),
+        "all_subjects": get_bool(app, "all_subjects", False),
         "ui": ui_settings,
     }
 
@@ -2646,7 +2658,7 @@ def main():
         source_sheet=str(sheet_name),
         wrong_sheet=str(wrong_sheet),
         base_cards=base_cards,
-        app_title=settings.get("app_title", getattr(funcs, "APP_TITLE", "SBFlash Pro")),
+        app_title=settings.get("app_title", "暗記カード"),
         app_version=APP_VERSION,
         ui_settings=settings.get("ui", {}),
         ini_path=settings.get("ini_path"),
