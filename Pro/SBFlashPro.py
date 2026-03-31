@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-SBFlashPro.py (release build Ver1.00)
+SBFlashPro.py (release build Ver1.01)
+
+Ver1.01 変更点
+- 進捗ログの最新NG問題だけを対象にする「間違い限定」機能を追加
+- 「間違い限定」⇔「限定解除」のトグルに対応
+- ランダム出題 / 論点復習 と併用可能に改善
+- 条件交差で0件になった場合の安全制御を追加
 
 Ver1.00 変更点
 - リリース版
@@ -90,7 +96,7 @@ DEFAULT_INI = getattr(funcs, "DEFAULT_INI_FILENAME", "SBFlashPro.ini")
 # =====================================
 # SBFlash Pro Version (on-code)
 # =====================================
-APP_VERSION = "Ver1.00"
+APP_VERSION = "Ver1.01"
 
 # =====================================
 # SBKnowledgeData Layout (0 origin)
@@ -1005,6 +1011,8 @@ class FlashcardsApp(tk.Tk):
         self.topic_tag = None
         self.reverse_mode = False
         self.random_mode = False
+        self.only_mistakes_mode = False
+        self.mistake_question_nos = set()
 
         self.correct_count = 0
         self.wrong_count = 0
@@ -1135,6 +1143,8 @@ class FlashcardsApp(tk.Tk):
         self.reverse_btn.pack(side="left", padx=(8, 0))
         self.random_btn = tk.Button(self.btn_frame, text="ランダム出題", command=self.toggle_random_mode)
         self.random_btn.pack(side="left", padx=(8, 0))
+        self.mistake_btn = tk.Button(self.btn_frame, text="間違い限定", command=self.toggle_mistake_mode)
+        self.mistake_btn.pack(side="left", padx=(8, 0))
         self.topic_btn = tk.Button(self.btn_frame, text="論点復習", command=self.filter_by_current_topic)
         self.topic_btn.pack(side="left", padx=(8, 0))
         self.topic_label = tk.Label(self.btn_frame, text="", anchor="w")
@@ -1281,7 +1291,7 @@ class FlashcardsApp(tk.Tk):
         self.bind_all("<Page_Down>", lambda e: _safe_invoke(self.next_btn))
 
         self.bind_all("<F1>", lambda e: _safe_invoke(self.check_btn))
-        self.bind_all("<F2>", lambda e: _safe_invoke(self.toggle_answer_explain_btn))
+        self.bind_all("<F2>", lambda e: self._handle_toggle_answer_explain_hotkey())
         self.bind_all("<F3>", lambda e: self._handle_save_answer_hotkey())
         self.bind_all("<F5>", lambda e: self._handle_toggle_bookmark_hotkey())
         self.bind_all("<F6>", lambda e: self._handle_clear_bookmarks_hotkey())
@@ -1356,11 +1366,17 @@ class FlashcardsApp(tk.Tk):
         current_key = None
         if keep_current and getattr(self, "cards", None):
             try:
-                current_key = self._current_card_key(self.current())
+                if self.cards:
+                    current_key = self._current_card_key(self.current())
             except Exception:
                 current_key = None
 
         self.cards = source_cards[:]
+
+        if getattr(self, "only_mistakes_mode", False):
+            target = {str(x).strip() for x in (self.mistake_question_nos or set()) if str(x).strip()}
+            self.cards = [c for c in self.cards if str(c.get("question_no", "")).strip() in target]
+
         if self.random_mode:
             random.shuffle(self.cards)
 
@@ -1388,6 +1404,18 @@ class FlashcardsApp(tk.Tk):
             if hasattr(self, "random_btn"):
                 # トグル式らしく、ボタンには「次に切り替わる先」を表示する
                 self.random_btn.configure(text=("通常出題" if self.random_mode else "ランダム出題"))
+        except Exception:
+            pass
+
+    def _update_mistake_button_state(self) -> None:
+        try:
+            if not hasattr(self, "mistake_btn"):
+                return
+            if self.only_mistakes_mode:
+                self.mistake_btn.configure(text="限定解除", state="normal")
+            else:
+                can_enable = self._has_progress_log()
+                self.mistake_btn.configure(text="間違い限定", state=("normal" if can_enable else "disabled"))
         except Exception:
             pass
 
@@ -1429,6 +1457,9 @@ class FlashcardsApp(tk.Tk):
 
     def _can_save_answer(self) -> bool:
         return self._is_feature_enabled("USE_SAVE_ANSWER", True)
+
+    def _can_toggle_answer_explain(self) -> bool:
+        return self._is_feature_enabled("USE_TOGGLE_ANSWER_EXPLAIN", True)
 
     def _can_toggle_bookmark(self) -> bool:
         return self._is_feature_enabled("USE_BOOKMARK_TOGGLE", True)
@@ -1482,7 +1513,9 @@ class FlashcardsApp(tk.Tk):
                     pass
 
             self._pack_button_safe(self.check_btn, side="left", padx=(0, 0))
-            self._pack_button_safe(self.toggle_answer_explain_btn, side="left", padx=(8, 0))
+            show_toggle_answer_explain = self._can_toggle_answer_explain()
+            if show_toggle_answer_explain:
+                self._pack_button_safe(self.toggle_answer_explain_btn, side="left", padx=(8, 0))
 
             show_save = self._can_save_answer()
             show_bm_toggle = self._can_toggle_bookmark()
@@ -1593,12 +1626,19 @@ class FlashcardsApp(tk.Tk):
     def _update_mode_label(self):
         try:
             # セレクトボックス横には、現在の出題順モードだけをわかりやすく表示する
-            self.mode_label.configure(text=("ランダム出題" if self.random_mode else "通常出題"))
+            modes = []
+            if self.random_mode:
+                modes.append("ランダム出題")
+            if getattr(self, "only_mistakes_mode", False):
+                modes.append("間違い限定")
+            self.mode_label.configure(text=(" / ".join(modes) if modes else "通常出題"))
+
             if hasattr(self, "reverse_btn"):
                 normal_label = str(self.ui_settings.get("reverse_label_normal", "解答⇔設問") or "解答⇔設問")
                 reversed_label = str(self.ui_settings.get("reverse_label_reversed", "設問⇔解答") or "設問⇔解答")
                 self.reverse_btn.configure(text=(reversed_label if self.reverse_mode else normal_label))
             self._update_random_button()
+            self._update_mistake_button_state()
         except Exception:
             pass
 
@@ -1685,6 +1725,14 @@ class FlashcardsApp(tk.Tk):
 
     def update_top_info(self):
         total = len(self.cards)
+        if total <= 0:
+            try:
+                self.top_info.configure(text="0 / 0")
+            except Exception:
+                pass
+            self._update_progress_buttons()
+            return
+
         page = self.index + 1
         ok = self.correct_count
         ng = self.wrong_count
@@ -1708,6 +1756,29 @@ class FlashcardsApp(tk.Tk):
         self._update_progress_buttons()
 
     def render(self):
+        if not self.cards:
+            try:
+                self.jump_var.set("")
+            except Exception:
+                pass
+            self.set_text(self.q_text, "該当する問題がありません。")
+            self.set_text(self.correct_text, "")
+            self.result_label.configure(text="")
+            self._hide_question_image()
+            self._hide_answer_image()
+            self.update_nav_buttons()
+            self._update_mode_label()
+            self._update_topic_button_state()
+            self._update_lower_mode_badge()
+            self.update_bookmark_ui()
+            self._apply_function_button_visibility()
+            self._update_self_grade_buttons()
+            try:
+                self.top_info.configure(text="0 / 0")
+            except Exception:
+                pass
+            return
+
         item = self.current()
         self._set_current_position(save=True)
         try:
@@ -1764,6 +1835,11 @@ class FlashcardsApp(tk.Tk):
             self.source_sheet = str(sheet_name)
 
             self._update_window_title()
+
+            if self.only_mistakes_mode:
+                self.mistake_question_nos = self._load_mistake_question_nos_from_log()
+                if not self.mistake_question_nos:
+                    self.only_mistakes_mode = False
 
             self._rebuild_cards_view(reset_index=True)
             self._restore_last_position()
@@ -2031,9 +2107,64 @@ class FlashcardsApp(tk.Tk):
         except Exception:
             pass
 
+    def _load_mistake_question_nos_from_log(self) -> set:
+        result_map = {}
+        try:
+            log_path = self._get_progress_log_path()
+            if not os.path.exists(log_path):
+                return set()
+
+            with open(log_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    parts = line.rstrip("\r\n").split("\t")
+                    if len(parts) < 3:
+                        continue
+                    qno = parts[1].strip()
+                    result = parts[2].strip().upper()
+                    if qno:
+                        result_map[qno] = result
+            return {qno for qno, result in result_map.items() if result == "NG"}
+        except Exception:
+            return set()
+
+    def toggle_mistake_mode(self):
+        try:
+            if not self.only_mistakes_mode:
+                mistake_set = self._load_mistake_question_nos_from_log()
+                if not mistake_set:
+                    messagebox.showinfo("情報", "現在、間違い問題はありません")
+                    self.only_mistakes_mode = False
+                    self.mistake_question_nos = set()
+                    self._update_mistake_button_state()
+                    return
+
+                self.only_mistakes_mode = True
+                self.mistake_question_nos = set(mistake_set)
+                self._rebuild_cards_view(reset_index=True)
+
+                if not self.cards:
+                    self.only_mistakes_mode = False
+                    self.mistake_question_nos = set()
+                    self._rebuild_cards_view(keep_current=True)
+                    self._update_mistake_button_state()
+                    messagebox.showinfo("情報", "現在の条件では、間違い問題がありません。")
+                    self.render()
+                    return
+            else:
+                self.only_mistakes_mode = False
+                self.mistake_question_nos = set()
+                self._rebuild_cards_view(keep_current=True)
+
+            self.render()
+        except Exception:
+            pass
+
     # ---------------- Filter by tag ----------------
     def filter_by_current_topic(self):
         if not self._can_use_topic_review():
+            return
+
+        if not self.cards:
             return
 
         if self.topic_tag:
@@ -2062,6 +2193,11 @@ class FlashcardsApp(tk.Tk):
         self.filtered_cards = filtered
         self.index = 0
         self._rebuild_cards_view(reset_index=True)
+        if not self.cards:
+            self.filtered_cards = self.all_cards[:]
+            self.topic_tag = None
+            self._rebuild_cards_view(keep_current=True)
+            messagebox.showinfo("情報", "間違い限定との組み合わせで該当問題がありませんでした。")
         self.render()
 
     # ---------------- Navigation ----------------
@@ -2398,6 +2534,7 @@ class FlashcardsApp(tk.Tk):
                 self.progress_reset_btn.configure(state=state)
             if hasattr(self, "progress_log_btn"):
                 self.progress_log_btn.configure(state=state)
+            self._update_mistake_button_state()
         except Exception:
             pass
 
@@ -2501,7 +2638,13 @@ class FlashcardsApp(tk.Tk):
                 with open(log_path, "w", encoding="utf-8"):
                     pass
 
+            if self.only_mistakes_mode:
+                self.only_mistakes_mode = False
+                self.mistake_question_nos = set()
+                self._rebuild_cards_view(keep_current=True)
+
             self.update_top_info()
+            self.render()
             messagebox.showinfo("完了", f"シート『{sheet_name}』の進捗をリセットしました。")
         except Exception as e:
             messagebox.showerror("エラー", f"進捗リセットに失敗しました。\n{e}")
@@ -2560,6 +2703,17 @@ class FlashcardsApp(tk.Tk):
             # log書き込み失敗で本体を落とさない
             pass
 
+
+    def _handle_toggle_answer_explain_hotkey(self):
+        if not self._can_toggle_answer_explain():
+            return
+        try:
+            if hasattr(self, "toggle_answer_explain_btn"):
+                state = str(self.toggle_answer_explain_btn.cget("state"))
+                if state != "disabled":
+                    self.toggle_answer_explain_btn.invoke()
+        except Exception:
+            pass
 
     def _handle_save_answer_hotkey(self):
         try:
