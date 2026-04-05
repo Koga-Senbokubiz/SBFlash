@@ -89,6 +89,7 @@ from tkinter import messagebox, ttk
 from PIL import Image, ImageTk
 
 import SBFlashFunctions as funcs
+from sbflash_rich_text import apply_rich_text_to_text_widget
 
 
 DEFAULT_INI = getattr(funcs, "DEFAULT_INI_FILENAME", "SBFlashPro.ini")
@@ -96,7 +97,7 @@ DEFAULT_INI = getattr(funcs, "DEFAULT_INI_FILENAME", "SBFlashPro.ini")
 # =====================================
 # SBFlash Pro Version (on-code)
 # =====================================
-APP_VERSION = "Ver1.01"
+APP_VERSION = "Ver1.02"
 
 # =====================================
 # SBKnowledgeData Layout (0 origin)
@@ -1311,10 +1312,19 @@ class FlashcardsApp(tk.Tk):
 
     # ---------------- UI helpers ----------------
     def set_text(self, widget: tk.Text, value: str):
-        widget.configure(state="normal")
-        widget.delete("1.0", "end")
-        widget.insert("1.0", value)
-        widget.configure(state="disabled")
+        try:
+            apply_rich_text_to_text_widget(
+                widget,
+                value,
+                base_font_family="Yu Gothic UI",
+                base_font_size=18,
+                big_font_size=24,
+            )
+        except Exception:
+            widget.configure(state="normal")
+            widget.delete("1.0", "end")
+            widget.insert("1.0", str(value))
+            widget.configure(state="disabled")
 
     def _get_display_question(self, item: dict) -> str:
         if self.reverse_mode:
