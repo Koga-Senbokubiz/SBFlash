@@ -1,6 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-SBFlashPro.py (release build Ver1.01)
+SBFlashPro.py (release build Ver1.03.1)
+
+Ver1.03.1 変更点
+- Excelファイルのロックを避けるため、読込処理を with pd.ExcelFile(...) に統一
+- Excel編集中でも保存しやすい read only 運用を強化
+
+Ver1.03 変更点
+- 上部バーに「データ再読込」ボタンを追加（進捗リセットの左）
+- 現在シートを再読込し、Excel修正内容を即反映
+- 再読込時は現在の設問番号をできるだけ維持
+- 回答シート前提のヘルプ文言を read only 運用向けに見直し
 
 Ver1.01 変更点
 - 進捗ログの最新NG問題だけを対象にする「間違い限定」機能を追加
@@ -97,7 +107,7 @@ DEFAULT_INI = getattr(funcs, "DEFAULT_INI_FILENAME", "SBFlashPro.ini")
 # =====================================
 # SBFlash Pro Version (on-code)
 # =====================================
-APP_VERSION = "Ver1.02"
+APP_VERSION = "Ver1.03.2"
 
 # =====================================
 # SBKnowledgeData Layout (0 origin)
@@ -333,8 +343,8 @@ def list_question_sheets(excel_path: str, wrong_sheet_name: str = "回答シー�
         return []
 
     try:
-        xls = pd.ExcelFile(p)
-        sheets = list(xls.sheet_names)
+        with pd.ExcelFile(p) as xls:
+            sheets = list(xls.sheet_names)
 
         filtered = []
         for s in sheets:
@@ -368,8 +378,8 @@ def resolve_sheet_name(excel_path: str, sheet_arg: str | None) -> str:
         return str(sheet_arg) if sheet_arg is not None else "sheet0"
 
     try:
-        xls = pd.ExcelFile(p)
-        names = xls.sheet_names
+        with pd.ExcelFile(p) as xls:
+            names = list(xls.sheet_names)
         if not names:
             return str(sheet_arg) if sheet_arg is not None else ""
 
@@ -456,7 +466,8 @@ def load_cards(excel_path: str, sheet_name: str, data_start_row: int = DATA_STAR
     if not path.exists():
         raise FileNotFoundError(f"Excelファイルが見つかりません: {path.resolve()}")
 
-    df = pd.read_excel(path, sheet_name=sheet_name)
+    with pd.ExcelFile(path) as xls:
+        df = pd.read_excel(xls, sheet_name=sheet_name)
     # データ開始行を調整（1行目はヘッダー扱い）
     df = df.iloc[max(0, data_start_row - 2):].reset_index(drop=True)
     while df.shape[1] < MIN_CARD_COLUMNS:
@@ -1063,6 +1074,9 @@ class FlashcardsApp(tk.Tk):
 
         self.progress_reset_btn = tk.Button(self.top_bar, text="進捗リセット", command=self.reset_progress_log)
         self.progress_reset_btn.pack(side="right", padx=(8, 0))
+        self.reload_btn = tk.Button(self.top_bar, text="データ再読込", command=self.reload_data)
+        self.reload_btn.pack(side="right", padx=(8, 0))
+
 
         self.sheet_combo.bind("<<ComboboxSelected>>", self.on_sheet_selected)
 
@@ -1256,7 +1270,7 @@ class FlashcardsApp(tk.Tk):
 
         self.help = tk.Label(
             self.left_frame,
-            text="判定/保存はボタンのみ。※保存はF1判定後。『回答保存』で回答シートへ登録（削除はExcel手動）",
+            text="Excelは read only 運用。修正はExcel側で保存後、「データ再読込」で反映します。進捗は logs フォルダで管理します。",
             anchor="w",
             padx=10,
             justify="left",
@@ -1869,6 +1883,69 @@ class FlashcardsApp(tk.Tk):
             self.render()
         except Exception as e:
             messagebox.showerror("エラー", str(e))
+
+    def reload_data(self) -> None:
+        try:
+            current_qno = None
+            if getattr(self, "cards", None):
+                try:
+                    current_qno = str(self.current().get("question_no", "") or "").strip()
+                except Exception:
+                    current_qno = None
+
+            base_cards = load_cards(
+                self.excel_path,
+                self.source_sheet,
+                data_start_row=self.data_start_row_default,
+            )
+            if not base_cards:
+                messagebox.showwarning("警告", "データが0件です。")
+                return
+
+            for c in base_cards:
+                c["source_sheet"] = str(self.source_sheet)
+
+            self.base_cards = base_cards[:]
+            self.all_cards = base_cards[:]
+            self.filtered_cards = base_cards[:]
+            self.topic_tag = None
+
+            if self.only_mistakes_mode:
+                self.mistake_question_nos = self._load_mistake_question_nos_from_log()
+                if not self.mistake_question_nos:
+                    self.only_mistakes_mode = False
+
+            self._rebuild_cards_view(reset_index=True)
+
+            restored = False
+            if current_qno:
+                idx = self._find_index_by_question_no(current_qno)
+                if idx >= 0:
+                    self.index = idx
+                    restored = True
+
+            if not restored:
+                self._restore_last_position()
+
+            self._qimage_map = {}
+            self._aimage_map = {}
+            try:
+                for c in (self.base_cards or []):
+                    k = (sheet_key(c.get("source_sheet")), str(c.get("question_no", "")).strip())
+                    self._qimage_map[k] = str(c.get("question_image_path", "") or "").strip()
+                    self._aimage_map[k] = str(c.get("answer_image_path", c.get("image_path", "")) or "").strip()
+            except Exception:
+                self._qimage_map = {}
+                self._aimage_map = {}
+
+            self.render()
+            try:
+                self.result_label.configure(text="🔄 データ再読込しました")
+                self.after(1200, lambda: self.result_label.configure(text=""))
+            except Exception:
+                pass
+        except Exception as e:
+            messagebox.showerror("再読込エラー", str(e))
 
     # ---------------- Image helpers ----------------
     def _get_question_image_path(self, item: dict) -> str:
