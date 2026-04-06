@@ -1,16 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-SBFlashPro.py (release build Ver1.03.1)
-
-Ver1.03.1 変更点
-- Excelファイルのロックを避けるため、読込処理を with pd.ExcelFile(...) に統一
-- Excel編集中でも保存しやすい read only 運用を強化
-
-Ver1.03 変更点
-- 上部バーに「データ再読込」ボタンを追加（進捗リセットの左）
-- 現在シートを再読込し、Excel修正内容を即反映
-- 再読込時は現在の設問番号をできるだけ維持
-- 回答シート前提のヘルプ文言を read only 運用向けに見直し
+SBFlashPro.py (release build Ver1.01)
 
 Ver1.01 変更点
 - 進捗ログの最新NG問題だけを対象にする「間違い限定」機能を追加
@@ -107,7 +97,7 @@ DEFAULT_INI = getattr(funcs, "DEFAULT_INI_FILENAME", "SBFlashPro.ini")
 # =====================================
 # SBFlash Pro Version (on-code)
 # =====================================
-APP_VERSION = "Ver1.03.2"
+APP_VERSION = "Ver1.04"
 
 # =====================================
 # SBKnowledgeData Layout (0 origin)
@@ -1025,6 +1015,7 @@ class FlashcardsApp(tk.Tk):
         self.random_mode = False
         self.only_mistakes_mode = False
         self.mistake_question_nos = set()
+        self.highlight_mode = 0  # 0:OFF / 1:1pt以上 / 2:2pt以上 / 3:3pt以上
 
         self.correct_count = 0
         self.wrong_count = 0
@@ -1074,9 +1065,9 @@ class FlashcardsApp(tk.Tk):
 
         self.progress_reset_btn = tk.Button(self.top_bar, text="進捗リセット", command=self.reset_progress_log)
         self.progress_reset_btn.pack(side="right", padx=(8, 0))
+
         self.reload_btn = tk.Button(self.top_bar, text="データ再読込", command=self.reload_data)
         self.reload_btn.pack(side="right", padx=(8, 0))
-
 
         self.sheet_combo.bind("<<ComboboxSelected>>", self.on_sheet_selected)
 
@@ -1160,6 +1151,8 @@ class FlashcardsApp(tk.Tk):
         self.random_btn.pack(side="left", padx=(8, 0))
         self.mistake_btn = tk.Button(self.btn_frame, text="間違い限定", command=self.toggle_mistake_mode)
         self.mistake_btn.pack(side="left", padx=(8, 0))
+        self.highlight_btn = tk.Button(self.btn_frame, text="強調限定", command=self.toggle_highlight_filter)
+        self.highlight_btn.pack(side="left", padx=(8, 0))
         self.topic_btn = tk.Button(self.btn_frame, text="論点復習", command=self.filter_by_current_topic)
         self.topic_btn.pack(side="left", padx=(8, 0))
         self.topic_label = tk.Label(self.btn_frame, text="", anchor="w")
@@ -1331,8 +1324,8 @@ class FlashcardsApp(tk.Tk):
                 widget,
                 value,
                 base_font_family="Yu Gothic UI",
-                base_font_size=18,
-                big_font_size=24,
+                base_font_size=18 if widget is self.q_text else 14,
+                big_font_size=24 if widget is self.q_text else 18,
             )
         except Exception:
             widget.configure(state="normal")
@@ -1401,6 +1394,8 @@ class FlashcardsApp(tk.Tk):
             target = {str(x).strip() for x in (self.mistake_question_nos or set()) if str(x).strip()}
             self.cards = [c for c in self.cards if str(c.get("question_no", "")).strip() in target]
 
+        self.cards = [c for c in self.cards if self._match_highlight_filter(c)]
+
         if self.random_mode:
             random.shuffle(self.cards)
 
@@ -1443,6 +1438,60 @@ class FlashcardsApp(tk.Tk):
         except Exception:
             pass
 
+
+    def _highlight_button_label(self) -> str:
+        mode = int(getattr(self, "highlight_mode", 0) or 0)
+        if mode == 0:
+            return "強調限定"
+        if mode == 1:
+            return "次強度"
+        if mode == 2:
+            return "次強度"
+        return "強調解除"
+
+    def _update_highlight_button_state(self) -> None:
+        try:
+            if hasattr(self, "highlight_btn"):
+                state = ("normal" if self._can_use_highlight_filter() else "disabled")
+                self.highlight_btn.configure(text=self._highlight_button_label(), state=state)
+        except Exception:
+            pass
+
+    def _card_highlight_score(self, card: dict) -> int:
+        fields = [
+            str(card.get("question", "") or ""),
+            str(card.get("answer", "") or ""),
+            str(card.get("explanation", "") or ""),
+            str(card.get("mnemonic", "") or ""),
+        ]
+        joined = "\n".join(fields)
+        score = 0
+        if re.search(r"<\s*b\s*>", joined, flags=re.IGNORECASE):
+            score += 1
+        if re.search(r"<\s*red\s*>", joined, flags=re.IGNORECASE):
+            score += 1
+        if re.search(r"<\s*big\s*>", joined, flags=re.IGNORECASE):
+            score += 1
+        return score
+
+    def _match_highlight_filter(self, card: dict) -> bool:
+        mode = int(getattr(self, "highlight_mode", 0) or 0)
+        if mode <= 0:
+            return True
+        return self._card_highlight_score(card) >= mode
+
+    def toggle_highlight_filter(self):
+        try:
+            if not self._can_use_highlight_filter():
+                return
+            self.highlight_mode = (int(getattr(self, "highlight_mode", 0) or 0) + 1) % 4
+            self._update_highlight_button_state()
+            self._rebuild_cards_view(reset_index=True)
+            if not self.cards and self.highlight_mode > 0:
+                messagebox.showinfo("情報", f"強調{self.highlight_mode}+ に該当する問題がありません。")
+            self.render()
+        except Exception:
+            pass
 
     def _tick_clock(self):
         try:
@@ -1497,6 +1546,9 @@ class FlashcardsApp(tk.Tk):
     def _can_use_topic_review(self) -> bool:
         return self._is_feature_enabled("USE_TOPIC_REVIEW", True)
 
+    def _can_use_highlight_filter(self) -> bool:
+        return self._is_feature_enabled("USE_HIGHLIGHT_FILTER", True)
+
     def _pack_button_safe(self, button: tk.Button, *, side: str, padx=(0, 0)) -> None:
         try:
             if not button.winfo_manager():
@@ -1526,6 +1578,7 @@ class FlashcardsApp(tk.Tk):
                 getattr(self, "self_ok_btn", None),
                 getattr(self, "self_ng_btn", None),
                 getattr(self, "ox_frame", None),
+                getattr(self, "highlight_btn", None),
                 getattr(self, "topic_btn", None),
                 getattr(self, "topic_label", None),
             ]
@@ -1547,6 +1600,7 @@ class FlashcardsApp(tk.Tk):
             show_bm_next = self._can_goto_next_bookmark()
             show_ox = self._can_use_ox_buttons()
             show_topic_review = self._can_use_topic_review()
+            show_highlight = self._can_use_highlight_filter()
             show_self_ok = bool(getattr(funcs, "USE_SELF_GRADE_CORRECT", True))
             show_self_ng = bool(getattr(funcs, "USE_SELF_GRADE_INCORRECT", True))
 
@@ -1571,6 +1625,8 @@ class FlashcardsApp(tk.Tk):
                 self._pack_button_safe(self.self_ng_btn, side="left", padx=(8, 0))
             if show_ox:
                 self._pack_button_safe(self.ox_frame, side="left", padx=(10, 0))
+            if show_highlight:
+                self._pack_button_safe(self.highlight_btn, side="left", padx=(16, 0))
             if show_topic_review:
                 self._pack_button_safe(self.topic_btn, side="left", padx=(16, 0))
                 self._pack_button_safe(self.topic_label, side="left", padx=(8, 0))
@@ -1655,6 +1711,8 @@ class FlashcardsApp(tk.Tk):
                 modes.append("ランダム出題")
             if getattr(self, "only_mistakes_mode", False):
                 modes.append("間違い限定")
+            if getattr(self, "highlight_mode", 0) > 0:
+                modes.append(f"強調{int(self.highlight_mode)}+")
             self.mode_label.configure(text=(" / ".join(modes) if modes else "通常出題"))
 
             if hasattr(self, "reverse_btn"):
@@ -1792,6 +1850,7 @@ class FlashcardsApp(tk.Tk):
             self._hide_answer_image()
             self.update_nav_buttons()
             self._update_mode_label()
+            self._update_highlight_button_state()
             self._update_topic_button_state()
             self._update_lower_mode_badge()
             self.update_bookmark_ui()
@@ -1813,6 +1872,7 @@ class FlashcardsApp(tk.Tk):
         self._show_question_image(item)
         self.update_nav_buttons()
         self._update_mode_label()
+        self._update_highlight_button_state()
         self._update_topic_button_state()
         self.update_top_info()
         self._update_lower_mode_badge()
@@ -1884,14 +1944,15 @@ class FlashcardsApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("エラー", str(e))
 
-    def reload_data(self) -> None:
+
+    def reload_data(self):
         try:
-            current_qno = None
+            current_qno = ""
             if getattr(self, "cards", None):
                 try:
                     current_qno = str(self.current().get("question_no", "") or "").strip()
                 except Exception:
-                    current_qno = None
+                    current_qno = ""
 
             base_cards = load_cards(
                 self.excel_path,
@@ -1899,8 +1960,7 @@ class FlashcardsApp(tk.Tk):
                 data_start_row=self.data_start_row_default,
             )
             if not base_cards:
-                messagebox.showwarning("警告", "データが0件です。")
-                return
+                raise ValueError("カードが0件です。")
 
             for c in base_cards:
                 c["source_sheet"] = str(self.source_sheet)
@@ -1908,12 +1968,26 @@ class FlashcardsApp(tk.Tk):
             self.base_cards = base_cards[:]
             self.all_cards = base_cards[:]
             self.filtered_cards = base_cards[:]
+            self.cards = base_cards[:]
             self.topic_tag = None
+            self._checked_this_card = False
+            self._last_is_ok = None
 
             if self.only_mistakes_mode:
                 self.mistake_question_nos = self._load_mistake_question_nos_from_log()
                 if not self.mistake_question_nos:
                     self.only_mistakes_mode = False
+
+            self._qimage_map = {}
+            self._aimage_map = {}
+            try:
+                for c in (self.base_cards or []):
+                    k = (sheet_key(c.get("source_sheet")), str(c.get("question_no", "")).strip())
+                    self._qimage_map[k] = str(c.get("question_image_path", "") or "").strip()
+                    self._aimage_map[k] = str(c.get("answer_image_path", c.get("image_path", "")) or "").strip()
+            except Exception:
+                self._qimage_map = {}
+                self._aimage_map = {}
 
             self._rebuild_cards_view(reset_index=True)
 
@@ -1927,23 +2001,7 @@ class FlashcardsApp(tk.Tk):
             if not restored:
                 self._restore_last_position()
 
-            self._qimage_map = {}
-            self._aimage_map = {}
-            try:
-                for c in (self.base_cards or []):
-                    k = (sheet_key(c.get("source_sheet")), str(c.get("question_no", "")).strip())
-                    self._qimage_map[k] = str(c.get("question_image_path", "") or "").strip()
-                    self._aimage_map[k] = str(c.get("answer_image_path", c.get("image_path", "")) or "").strip()
-            except Exception:
-                self._qimage_map = {}
-                self._aimage_map = {}
-
             self.render()
-            try:
-                self.result_label.configure(text="🔄 データ再読込しました")
-                self.after(1200, lambda: self.result_label.configure(text=""))
-            except Exception:
-                pass
         except Exception as e:
             messagebox.showerror("再読込エラー", str(e))
 
