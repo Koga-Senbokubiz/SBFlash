@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-SBFlashPro.py (release build Ver1.01)
+SBFlashPro.py (release build Ver1.05)
+
+Ver1.05 変更点
+- 問題 / 回答 / 解説 のフォントサイズを ini で指定可能に変更
+- 回答入力の ○× ボタン押下時は上書きではなく改行追記に変更
+- ○×問題は ①②③④ などを無視し、○×の並びが一致すれば正解判定に変更
 
 Ver1.01 変更点
 - 進捗ログの最新NG問題だけを対象にする「間違い限定」機能を追加
@@ -97,7 +102,7 @@ DEFAULT_INI = getattr(funcs, "DEFAULT_INI_FILENAME", "SBFlashPro.ini")
 # =====================================
 # SBFlash Pro Version (on-code)
 # =====================================
-APP_VERSION = "Ver1.04"
+APP_VERSION = "Ver1.05"
 
 # =====================================
 # SBKnowledgeData Layout (0 origin)
@@ -163,6 +168,9 @@ def _create_default_ini(path: Path) -> None:
         "max_height=1400\n"
         "thumb_size=400\n"
         "zoom_max=1200\n"
+        "question_font_size=20\n"
+        "answer_font_size=18\n"
+        "explanation_font_size=14\n"
     )
     path.write_text(text, encoding="utf-8")
 
@@ -240,6 +248,9 @@ def load_settings() -> dict:
         "max_height": get_int(ui, "max_height", 1400),
         "thumb_size": get_int(ui, "thumb_size", 400),
         "zoom_max": get_int(ui, "zoom_max", 1200),
+        "question_font_size": get_int(ui, "question_font_size", 20),
+        "answer_font_size": get_int(ui, "answer_font_size", 18),
+        "explanation_font_size": get_int(ui, "explanation_font_size", 14),
         "reverse_label_normal": (ui.get("reverse_label_normal", fallback="解答⇔設問") if ui is not None else "解答⇔設問").strip() or "解答⇔設問",
         "reverse_label_reversed": (ui.get("reverse_label_reversed", fallback="設問⇔解答") if ui is not None else "設問⇔解答").strip() or "設問⇔解答",
     }
@@ -278,6 +289,19 @@ def parse_keywords(v):
     return parse_list_cell(v)
 
 
+def _extract_ox_sequence(s: str) -> str:
+    if s is None:
+        return ""
+    src = unicodedata.normalize("NFKC", str(s))
+    seq = []
+    for ch in src:
+        if ch in ("○", "〇"):
+            seq.append("○")
+        elif ch in ("×", "✕", "✖", "x", "X"):
+            seq.append("×")
+    return "".join(seq)
+
+
 def normalize_answer(s: str) -> str:
     if s is None:
         return ""
@@ -285,11 +309,9 @@ def normalize_answer(s: str) -> str:
     s = unicodedata.normalize("NFKC", s)
     s = s.strip()
 
-    # ○×問題は記号自体が解答になるため、先に代表表記へそろえる
-    if s in ("○", "〇"):
-        return "○"
-    if s in ("×", "✕", "✖", "x", "X"):
-        return "×"
+    ox_seq = _extract_ox_sequence(s)
+    if ox_seq:
+        return ox_seq
 
     s = s.lower()
     s = re.sub(r"\s+", "", s)
@@ -405,6 +427,16 @@ def _safe_iloc(row, col_index, default=""):
 def has_trim_value(v) -> bool:
     return str(v if v is not None else "").strip() != ""
 
+def normalize(text):
+    if not text:
+        return text
+
+    text = text.replace("_x000D_", "")
+
+    # ★追加（ここだけ）
+    text = re.sub(r"。([①-⑩])", r"。\n\1", text)
+
+    return text
 
 def extract_question_row(row, row_number_for_fallback: int):
     q_no = str(_safe_iloc(row, COL_QUESTION_NO, "")).strip()
@@ -1024,8 +1056,11 @@ class FlashcardsApp(tk.Tk):
 
         self.lower_mode = "answer"  # 初期は正解モード
         self.lower_modes = ["answer"]
-        self.q_font = ("Yu Gothic UI", 20)
-        self.a_font = ("Yu Gothic UI", 18)
+        self.question_font_size = int(self.ui_settings.get("question_font_size", 20))
+        self.answer_font_size = int(self.ui_settings.get("answer_font_size", 18))
+        self.explanation_font_size = int(self.ui_settings.get("explanation_font_size", 14))
+        self.q_font = ("Yu Gothic UI", self.question_font_size)
+        self.a_font = ("Yu Gothic UI", self.answer_font_size)
 
         self.base_cards = base_cards[:]
 
@@ -1108,7 +1143,7 @@ class FlashcardsApp(tk.Tk):
 
         self.q_text = tk.Text(
             self.q_frame,
-            wrap="word",
+            wrap="char",
             font=self.q_font,
             height=6,
             yscrollcommand=self.q_scroll.set,
@@ -1243,7 +1278,7 @@ class FlashcardsApp(tk.Tk):
 
         self.correct_text = tk.Text(
             self.correct_text_frame,
-            wrap="word",
+            wrap="char",
             font=self.a_font,
             height=6,
             yscrollcommand=self.correct_scroll.set,
@@ -1318,14 +1353,25 @@ class FlashcardsApp(tk.Tk):
         self.render()
 
     # ---------------- UI helpers ----------------
-    def set_text(self, widget: tk.Text, value: str):
+    def set_text(self, widget: tk.Text, value: str, text_kind: str | None = None):
+        value = normalize(value)
         try:
+            if text_kind == "question":
+                base_font_size = self.question_font_size
+                big_font_size = max(self.question_font_size + 4, self.question_font_size)
+            elif text_kind == "explanation":
+                base_font_size = self.explanation_font_size
+                big_font_size = max(self.explanation_font_size + 4, self.explanation_font_size)
+            else:
+                base_font_size = self.answer_font_size
+                big_font_size = max(self.answer_font_size + 4, self.answer_font_size)
+
             apply_rich_text_to_text_widget(
                 widget,
                 value,
                 base_font_family="Yu Gothic UI",
-                base_font_size=18 if widget is self.q_text else 14,
-                big_font_size=24 if widget is self.q_text else 18,
+                base_font_size=base_font_size,
+                big_font_size=big_font_size,
             )
         except Exception:
             widget.configure(state="normal")
@@ -1674,8 +1720,13 @@ class FlashcardsApp(tk.Tk):
         if not self._can_use_ox_buttons():
             return
         try:
-            self.answer_text.delete("1.0", "end")
-            self.answer_text.insert("1.0", symbol)
+            current = self.answer_text.get("1.0", "end-1c").rstrip()
+            if current:
+                if not current.endswith("\n"):
+                    self.answer_text.insert("end", "\n")
+                self.answer_text.insert("end", symbol)
+            else:
+                self.answer_text.insert("1.0", symbol)
             if hasattr(self, "ox_var"):
                 self.ox_var.set(symbol)
             self.answer_text.focus_set()
@@ -1690,7 +1741,7 @@ class FlashcardsApp(tk.Tk):
         if hasattr(self, "ox_var"):
             self.ox_var.set("")
         self.result_label.configure(text="")
-        self.set_text(self.correct_text, "")
+        self.set_text(self.correct_text, "", text_kind="answer")
         self._hide_answer_image()
         self._checked_this_card = False
         self._last_is_ok = None
@@ -1843,8 +1894,8 @@ class FlashcardsApp(tk.Tk):
                 self.jump_var.set("")
             except Exception:
                 pass
-            self.set_text(self.q_text, "該当する問題がありません。")
-            self.set_text(self.correct_text, "")
+            self.set_text(self.q_text, "該当する問題がありません。", text_kind="question")
+            self.set_text(self.correct_text, "", text_kind="answer")
             self.result_label.configure(text="")
             self._hide_question_image()
             self._hide_answer_image()
@@ -1868,7 +1919,7 @@ class FlashcardsApp(tk.Tk):
             self.jump_var.set(str(item.get("question_no", "") or ""))
         except Exception:
             pass
-        self.set_text(self.q_text, self._get_display_question(item))
+        self.set_text(self.q_text, self._get_display_question(item), text_kind="question")
         self._show_question_image(item)
         self.update_nav_buttons()
         self._update_mode_label()
@@ -2139,17 +2190,21 @@ class FlashcardsApp(tk.Tk):
 
     def _refresh_lower_text(self):
         item = self.current()
+        text_kind = "answer"
         if self.lower_mode == "answer":
             text = self._get_display_answer(item)
+            text_kind = "answer"
         elif self.lower_mode == "explain":
             text = (item.get("explanation", "") or "").strip()
             if not text:
                 text = "（解説なし）"
+            text_kind = "explanation"
         else:
             text = (item.get("mnemonic", "") or "").strip()
             if not text:
                 text = "（語呂合せなし）"
-        self.set_text(self.correct_text, text)
+            text_kind = "answer"
+        self.set_text(self.correct_text, text, text_kind=text_kind)
 
     def check_answer(self):
         item = self.current()
