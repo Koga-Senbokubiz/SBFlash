@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-SBFlashPro.py (release build Ver1.05)
+SBFlashPro.py (release build Ver1.06)
+
+Ver1.06 変更点
+- ○×式の不正解時、間違った肢だけを赤太文字で表示する機能を追加
+- ①②③④付きで正解欄を表示し、どの肢を間違えたか一目で分かるように改善
 
 Ver1.05 変更点
 - 問題 / 回答 / 解説 のフォントサイズを ini で指定可能に変更
@@ -102,7 +106,7 @@ DEFAULT_INI = getattr(funcs, "DEFAULT_INI_FILENAME", "SBFlashPro.ini")
 # =====================================
 # SBFlash Pro Version (on-code)
 # =====================================
-APP_VERSION = "Ver1.05"
+APP_VERSION = "Ver1.06"
 
 # =====================================
 # SBKnowledgeData Layout (0 origin)
@@ -1218,8 +1222,17 @@ class FlashcardsApp(tk.Tk):
             command=lambda: self.set_answer_symbol("×"),
             takefocus=0,
         )
+        self.btn_q = tk.Button(
+            self.ox_frame,
+            text="？",
+            width=3,
+            font=("Yu Gothic UI", 11, "bold"),
+            command=lambda: self.set_answer_symbol("？"),
+            takefocus=0,
+        )
         self.btn_o.pack(side="left", padx=(0, 4))
-        self.btn_x.pack(side="left")
+        self.btn_x.pack(side="left", padx=(0, 4))
+        self.btn_q.pack(side="left")
 
         self.answer_input_frame = tk.Frame(self.mid_frame)
         self.answer_input_frame.grid(row=2, column=0, sticky="ew", pady=(4, 8))
@@ -2188,11 +2201,53 @@ class FlashcardsApp(tk.Tk):
         if getattr(self, "_checked_this_card", False):
             self._refresh_lower_text()
 
+    def _build_ox_result_text(self, user_raw: str, correct_raw: str) -> str:
+        """○×式の正解表示を作る。
+
+        ユーザー回答と正解の○×列を1文字ずつ比較し、
+        間違った肢だけ <red><b>...</b></red> で強調する。
+        ○×式ではない場合は、元の正解文字列をそのまま返す。
+        """
+        try:
+            user_seq = _extract_ox_sequence(user_raw)
+            correct_seq = _extract_ox_sequence(correct_raw)
+
+            if not user_seq or not correct_seq:
+                return correct_raw
+
+            nums = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨", "⑩"]
+            lines = []
+
+            for i, ch in enumerate(correct_seq):
+                no = nums[i] if i < len(nums) else str(i + 1)
+                user_ch = user_seq[i] if i < len(user_seq) else ""
+
+                if user_ch != ch:
+                    lines.append(f"<red><big><b>{no} {ch}</b></big></red>")
+                else:
+                    lines.append(f"{no} {ch}")
+
+            return "\n".join(lines)
+        except Exception:
+            return correct_raw
+
     def _refresh_lower_text(self):
         item = self.current()
         text_kind = "answer"
         if self.lower_mode == "answer":
             text = self._get_display_answer(item)
+
+            # Ver1.06:
+            # ○×式の場合、F1判定後に「間違った肢だけ」を赤太文字で表示する。
+            # 例）ユーザー: ○××○ / 正解: ×××○
+            #     → ① × だけ赤太文字、②③④は通常表示
+            if getattr(self, "_checked_this_card", False):
+                try:
+                    user_raw = self.answer_text.get("1.0", "end-1c")
+                    text = self._build_ox_result_text(user_raw, text)
+                except Exception:
+                    pass
+
             text_kind = "answer"
         elif self.lower_mode == "explain":
             text = (item.get("explanation", "") or "").strip()
